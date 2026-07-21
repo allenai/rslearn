@@ -14,6 +14,7 @@ import wandb
 from lightning.pytorch import LightningDataModule, LightningModule, Trainer
 from lightning.pytorch.callbacks import Callback
 from lightning.pytorch.cli import LightningArgumentParser, LightningCLI
+from lightning.pytorch.loggers import MLFlowLogger
 from lightning.pytorch.utilities import rank_zero_only
 from upath import UPath
 
@@ -23,6 +24,7 @@ from rslearn.utils.fsspec import open_atomic
 from rslearn.utils.jsonargparse import init_jsonargparse
 
 WANDB_ID_FNAME = "wandb_id"
+MLFLOW_ID_FNAME = "mlflow_id"
 
 logger = get_logger(__name__)
 
@@ -104,6 +106,47 @@ class SaveWandbRunIdCallback(Callback):
             wandb.config.update(json.loads(self.config_str))
 
 
+class SaveMLflowRunIdCallback(Callback):
+    """Save the MLflow run ID and experiment configuration for resuming."""
+
+    def __init__(self, project_dir: str, config_str: str) -> None:
+        """Create a new SaveMLflowRunIdCallback.
+
+        Args:
+            project_dir: the project directory.
+            config_str: the JSON-encoded configuration of this experiment.
+        """
+        self.project_dir = project_dir
+        self.config_str = config_str
+
+    @rank_zero_only
+    def on_fit_start(self, trainer: Trainer, pl_module: LightningModule) -> None:
+        """Persist the run ID and log the configuration as an artifact.
+
+        Args:
+            trainer: the Trainer object.
+            pl_module: the LightningModule object.
+        """
+        if not isinstance(trainer.logger, MLFlowLogger):
+            raise ValueError("SaveMLflowRunIdCallback requires an MLFlowLogger")
+
+        run_id = trainer.logger.run_id
+        if run_id is None:
+            raise ValueError("MLFlowLogger did not provide a run ID")
+
+        project_dir = UPath(self.project_dir)
+        project_dir.mkdir(parents=True, exist_ok=True)
+        with (project_dir / MLFLOW_ID_FNAME).open("w") as f:
+            f.write(run_id)
+
+        if self.config_str is not None:
+            trainer.logger.experiment.log_dict(
+                run_id=run_id,
+                dictionary=json.loads(self.config_str),
+                artifact_file="config.json",
+            )
+
+
 class RslearnLightningCLI(LightningCLI):
     """LightningCLI that links data.tasks to model.tasks and supports environment variables."""
 
@@ -130,11 +173,11 @@ class RslearnLightningCLI(LightningCLI):
             }
         )
 
-        # Project management option to have rslearn manage checkpoints and W&B run.
+        # Project management option to have rslearn manage checkpoints and logger run.
         parser.add_argument(
             "--management_dir",
             type=str | None,
-            help="Enable project management, and use this directory to store checkpoints and configs. If enabled, rslearn will automatically manages checkpoint directory/loading and W&B run",
+            help="Enable project management, and use this directory to store checkpoints and configs. If enabled, rslearn will automatically manage checkpoint directory/loading and the configured logger run",
             default=None,
         )
         parser.add_argument(
@@ -170,7 +213,7 @@ class RslearnLightningCLI(LightningCLI):
         parser.add_argument(
             "--log_mode",
             type=str,
-            help="Whether to log to W&B (used with --management_dir). 'yes' will enable logging, 'no' will disable logging, and 'auto' will use 'yes' during fit and 'no' during val/test/predict.",
+            help="Whether to use the configured experiment logger (used with --management_dir). 'yes' will enable logging, 'no' will disable logging, and 'auto' will use 'yes' during fit and 'no' during val/test/predict.",
             default="auto",
         )
 
@@ -283,10 +326,10 @@ class RslearnLightningCLI(LightningCLI):
         """Enable project management in the specified directory.
 
         Sets default_root_dir on the trainer (used by ManagedBestLastCheckpoint),
-        configures W&B logging, and handles checkpoint loading/resuming.
+        configures W&B or MLflow logging, and handles checkpoint loading/resuming.
 
         Args:
-            management_dir: the directory to store checkpoints and W&B.
+            management_dir: the directory to store checkpoints and logger metadata.
         """
         subcommand = self.config.subcommand
         c = self.config[subcommand]
@@ -308,7 +351,8 @@ class RslearnLightningCLI(LightningCLI):
         # ModelCheckpoint that writes to the logger's directory.
         c.trainer.enable_checkpointing = False
 
-        # Configure W&B logging.
+        # Configure experiment logging. W&B remains the default for compatibility;
+        # users select MLflow with trainer.logger.class_path in their config.
         should_log = False
         if c.log_mode == "yes":
             should_log = True
@@ -323,26 +367,46 @@ class RslearnLightningCLI(LightningCLI):
                         "init_args": jsonargparse.Namespace(),
                     }
                 )
-            c.trainer.logger.init_args.project = c.project_name
-            c.trainer.logger.init_args.name = c.run_name
-            if c.run_description:
-                c.trainer.logger.init_args.notes = c.run_description
+            logger_class = c.trainer.logger.class_path.rsplit(".", 1)[-1]
+            if logger_class == "WandbLogger":
+                c.trainer.logger.init_args.project = c.project_name
+                c.trainer.logger.init_args.name = c.run_name
+                if c.run_description:
+                    c.trainer.logger.init_args.notes = c.run_description
+            elif logger_class == "MLFlowLogger":
+                c.trainer.logger.init_args.experiment_name = c.project_name
+                c.trainer.logger.init_args.run_name = c.run_name
+                if c.run_description:
+                    tags = c.trainer.logger.init_args.get("tags", {}) or {}
+                    tags["mlflow.note.content"] = c.run_description
+                    c.trainer.logger.init_args.tags = tags
+            else:
+                raise ValueError(
+                    "Project management logging only supports WandbLogger and "
+                    f"MLFlowLogger, got {c.trainer.logger.class_path}"
+                )
 
-            # Add callback to save W&B run ID for resume.
+            # Add a callback to save the logger run ID for resume.
             if "callbacks" not in c.trainer or not c.trainer.callbacks:
                 c.trainer.callbacks = []
 
-            has_wandb_callback = any(
-                cb.class_path == "SaveWandbRunIdCallback" for cb in c.trainer.callbacks
+            callback_class = (
+                "SaveWandbRunIdCallback"
+                if logger_class == "WandbLogger"
+                else "SaveMLflowRunIdCallback"
             )
-            if not has_wandb_callback:
+            has_logger_callback = any(
+                cb.class_path.rsplit(".", 1)[-1] == callback_class
+                for cb in c.trainer.callbacks
+            )
+            if not has_logger_callback:
                 config_str = json.dumps(
                     c.as_dict(), default=lambda _: "<not serializable>"
                 )
                 c.trainer.callbacks.append(
                     jsonargparse.Namespace(
                         {
-                            "class_path": "SaveWandbRunIdCallback",
+                            "class_path": callback_class,
                             "init_args": jsonargparse.Namespace(
                                 {
                                     "project_dir": str(project_dir),
@@ -369,16 +433,20 @@ class RslearnLightningCLI(LightningCLI):
             logger.info(f"found checkpoint to resume from at {checkpoint_path}")
             c.ckpt_path = checkpoint_path
 
-            # If we are resuming from a checkpoint for training, we also try to resume the W&B run.
-            if (
-                subcommand == "fit"
-                and (project_dir / WANDB_ID_FNAME).exists()
-                and should_log
-            ):
-                with (project_dir / WANDB_ID_FNAME).open("r") as f:
-                    wandb_id = f.read().strip()
-                    c.trainer.logger.init_args.id = wandb_id
-                    c.trainer.logger.init_args.resume = "must"
+            # When training resumes, reconnect to the original experiment run.
+            if subcommand == "fit" and should_log:
+                logger_class = c.trainer.logger.class_path.rsplit(".", 1)[-1]
+                if logger_class == "WandbLogger":
+                    run_id_path = project_dir / WANDB_ID_FNAME
+                    if run_id_path.exists():
+                        with run_id_path.open("r") as f:
+                            c.trainer.logger.init_args.id = f.read().strip()
+                        c.trainer.logger.init_args.resume = "must"
+                elif logger_class == "MLFlowLogger":
+                    run_id_path = project_dir / MLFLOW_ID_FNAME
+                    if run_id_path.exists():
+                        with run_id_path.open("r") as f:
+                            c.trainer.logger.init_args.run_id = f.read().strip()
 
     def before_instantiate_classes(self) -> None:
         """Called before Lightning class initialization."""

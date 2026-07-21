@@ -119,3 +119,28 @@ class TestConfusionMatrixOutput:
         assert cm_call_args["title"] == "val_confusion_matrix"
         assert len(cm_call_args["preds"]) == 6
         assert len(cm_call_args["y_true"]) == 6
+
+    def test_log_to_mlflow(self) -> None:
+        """Test that MLflow receives a compact confusion-matrix table."""
+
+        class MockClient:
+            def __init__(self) -> None:
+                self.kwargs: dict = {}
+
+            def log_table(self, **kwargs: object) -> None:
+                self.kwargs = kwargs
+
+        client = MockClient()
+        output = ConfusionMatrixOutput(
+            confusion_matrix=torch.tensor([[2, 1], [0, 3]], dtype=torch.long),
+            class_names=["a", "b"],
+        )
+        output.log_to_mlflow("val_confusion_matrix", client, "run-123")
+
+        assert client.kwargs["run_id"] == "run-123"
+        assert client.kwargs["artifact_file"] == "val_confusion_matrix.json"
+        assert client.kwargs["data"] == {
+            "true_class": ["a", "a", "b", "b"],
+            "predicted_class": ["a", "b", "a", "b"],
+            "count": [2, 1, 0, 3],
+        }

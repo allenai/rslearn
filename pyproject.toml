@@ -67,6 +67,7 @@ extra = [
     "transformers>=4.55",
     "wandb>=0.21",
     "timm>=0.9.7",
+    "mlflow-skinny>=2.8",
 ]
 
 dev = [
