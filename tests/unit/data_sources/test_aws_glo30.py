@@ -7,7 +7,7 @@ import shapely
 from rslearn.config import QueryConfig, SpaceMode
 from rslearn.const import WGS84_PROJECTION
 from rslearn.data_sources import Item
-from rslearn.data_sources.copernicus_glo30 import (
+from rslearn.data_sources.aws_glo30 import (
     CopernicusGLO30,
     _tile_name,
     _tile_url,

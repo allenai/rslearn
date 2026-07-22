@@ -9,7 +9,7 @@ from rasterio.crs import CRS
 from upath import UPath
 
 from rslearn.config import QueryConfig, SpaceMode
-from rslearn.data_sources.copernicus_glo30 import CopernicusGLO30, _tile_name
+from rslearn.data_sources.aws_glo30 import CopernicusGLO30, _tile_name
 from rslearn.tile_stores import DefaultTileStore, TileStoreWithLayer
 from rslearn.utils.geometry import Projection, STGeometry
 from rslearn.utils.raster_array import RasterArray

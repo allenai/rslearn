@@ -1,4 +1,4 @@
-## rslearn.data_sources.copernicus_glo30.CopernicusGLO30
+## rslearn.data_sources.aws_glo30.CopernicusGLO30
 
 Copernicus GLO-30 DEM (30m) elevation data, served directly from the original public
 AWS S3 bucket at `s3://copernicus-dem-30m` (no credentials required).
@@ -15,7 +15,7 @@ gradients.
 
 ```jsonc
 {
-  "class_path": "rslearn.data_sources.copernicus_glo30.CopernicusGLO30",
+  "class_path": "rslearn.data_sources.aws_glo30.CopernicusGLO30",
   "init_args": {
     // Timeout for HTTP requests (default: 30s).
     "timeout": "30s"
@@ -49,7 +49,7 @@ Example with all three bands:
     "dtype": "float32"
   }],
   "data_source": {
-    "class_path": "rslearn.data_sources.copernicus_glo30.CopernicusGLO30",
+    "class_path": "rslearn.data_sources.aws_glo30.CopernicusGLO30",
     "query_config": {
       "space_mode": "MOSAIC",
       "max_matches": 1
@@ -69,7 +69,7 @@ Example with elevation only:
     "dtype": "float32"
   }],
   "data_source": {
-    "class_path": "rslearn.data_sources.copernicus_glo30.CopernicusGLO30",
+    "class_path": "rslearn.data_sources.aws_glo30.CopernicusGLO30",
     "query_config": {
       "space_mode": "MOSAIC",
       "max_matches": 1

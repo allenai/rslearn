@@ -20,6 +20,12 @@ Slope and aspect are computed from the geographic (EPSG:4326) grid with per-row
 latitude correction for proper metric gradients.
 
 Items from this data source do not come with a time range (the DEM is static).
+
+Note: the AWS ``copernicus-dem-30m`` bucket serves the Copernicus DEM 2021 release.
+Newer releases (e.g. 2024_1) are only available through the Copernicus Data Space
+Ecosystem API, not this public bucket. See also
+``rslearn.data_sources.planetary_computer.CopDemGlo30`` for the same dataset via
+Microsoft Planetary Computer.
 """
 
 from __future__ import annotations
@@ -32,6 +38,7 @@ from datetime import timedelta
 import numpy as np
 import rasterio
 import shapely
+from upath import UPath
 
 from rslearn.config import QueryConfig, SpaceMode
 from rslearn.const import WGS84_PROJECTION
@@ -98,7 +105,7 @@ def compute_terrain(
         flat pixels. Nodata pixels are set to NaN.
     """
     dem = elevation.astype(np.float32)
-    height, width = dem.shape
+    height = dem.shape[0]
 
     nodata_mask = None
     if nodata is not None:
@@ -163,7 +170,7 @@ class CopernicusGLO30(DataSource):
     Example config::
 
         {
-            "class_path": "rslearn.data_sources.copernicus_glo30.CopernicusGLO30",
+            "class_path": "rslearn.data_sources.aws_glo30.CopernicusGLO30",
             "init_args": {},
             "query_config": {"space_mode": "MOSAIC", "max_matches": 1},
             "ingest": true
@@ -342,8 +349,6 @@ class CopernicusGLO30(DataSource):
                     )
                 else:
                     # Elevation only — pass through the original file.
-                    from upath import UPath
-
                     tile_store.write_raster_file(
                         item,
                         self.band_names,
@@ -360,8 +365,6 @@ class CopernicusGLO30(DataSource):
         tmp_dir: str,
     ) -> None:
         """Read elevation, compute derivatives, and write a multi-band GeoTIFF."""
-        from upath import UPath
-
         with rasterio.open(raw_path) as src:
             elevation = src.read(1)
             profile = src.profile.copy()
@@ -371,12 +374,17 @@ class CopernicusGLO30(DataSource):
         band_arrays: dict[str, np.ndarray] = {}
         band_arrays["elevation"] = elevation.astype(np.float32)
 
-        if self._needs_slope or self._needs_aspect:
-            slope, aspect = compute_terrain(
-                elevation, pixel_size_deg, lat_south, nodata=nodata
-            )
-            band_arrays["slope"] = slope
-            band_arrays["aspect"] = aspect
+        slope, aspect = compute_terrain(
+            elevation, pixel_size_deg, lat_south, nodata=nodata
+        )
+        # compute_terrain marks nodata pixels as NaN. Keep the output nodata
+        # representation consistent across all three bands by reusing the source
+        # nodata value (the elevation band already uses it at those pixels).
+        if nodata is not None:
+            slope = np.where(np.isnan(slope), np.float32(nodata), slope)
+            aspect = np.where(np.isnan(aspect), np.float32(nodata), aspect)
+        band_arrays["slope"] = slope
+        band_arrays["aspect"] = aspect
 
         # Stack requested bands in config order.
         stack = np.stack([band_arrays[b] for b in self.band_names], axis=0)
@@ -387,8 +395,10 @@ class CopernicusGLO30(DataSource):
             dtype="float32",
             compress="deflate",
         )
+        # profile already carries the source nodata value (or None).
         with rasterio.open(out_path, "w", **profile) as dst:
             dst.write(stack)
+            dst.descriptions = tuple(self.band_names)
 
         tile_store.write_raster_file(
             item,
