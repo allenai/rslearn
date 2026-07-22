@@ -19,7 +19,8 @@ as derived bands during ingest. Configure the desired bands via the layer config
 Slope and aspect are computed from the geographic (EPSG:4326) grid with per-row
 latitude correction for proper metric gradients.
 
-Items from this data source do not come with a time range (the DEM is static).
+The underlying elevation data were acquired by the TanDEM-X mission between 2011 and
+2015. Items from this data source do not come with a time range (the DEM is static).
 
 Note: the AWS ``copernicus-dem-30m`` bucket serves the Copernicus DEM 2021 release.
 Newer releases (e.g. 2024_1) are only available through the Copernicus Data Space
@@ -161,8 +162,9 @@ def compute_terrain(
 class CopernicusGLO30(DataSource):
     """Data source for Copernicus GLO-30 DEM from the public S3 bucket.
 
-    The data is split into 1x1-degree COG tiles.  Items from this data source do
-    not carry a time range (the DEM is static).
+    The data is split into 1x1-degree COG tiles. The underlying elevation was
+    acquired by the TanDEM-X mission between 2011 and 2015. Items from this data
+    source do not carry a time range (the DEM is static).
 
     The layer's ``band_sets`` should contain a single band set with one or more of
     the supported band names: ``elevation``, ``slope``, ``aspect``.
