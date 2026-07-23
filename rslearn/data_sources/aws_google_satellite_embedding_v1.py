@@ -2,6 +2,7 @@
 
 import os
 import tempfile
+import threading
 from collections.abc import Callable
 from datetime import UTC, datetime
 from typing import Any
@@ -31,11 +32,14 @@ from rslearn.data_sources.direct_materialize_data_source import (
     DirectMaterializeDataSource,
 )
 from rslearn.data_sources.utils import MatchedItemGroup
-from rslearn.utils.fsspec import join_upath
+from rslearn.log_utils import get_logger
+from rslearn.utils.fsspec import join_upath, open_atomic
 from rslearn.utils.geometry import PixelBounds, Projection, STGeometry
 from rslearn.utils.grid_index import GridIndex
 from rslearn.utils.raster_array import RasterArray, RasterMetadata
 from rslearn.utils.raster_format import get_raster_projection_and_bounds
+
+logger = get_logger(__name__)
 
 # Band names for the 64 embedding channels
 BANDS = [f"A{idx:02d}" for idx in range(64)]
@@ -141,9 +145,36 @@ class GoogleSatelliteEmbeddingV1(
             region_name="us-west-2",
         )
 
-        # Lazy-loaded grid index
+        # Lazy-loaded grid index, guarded by a lock so that concurrent readers
+        # (e.g. threads in a materialization pool) download and parse the index
+        # only once.
+        self._index_lock = threading.Lock()
         self._grid_index: GridIndex | None = None
         self._items_by_name: dict[str, GoogleSatelliteEmbeddingV1Item] | None = None
+
+    def _download_index_csv(self, cache_file: UPath) -> None:
+        """Download the index CSV from S3 to the cache file.
+
+        The download is streamed via open_atomic so a killed or concurrent run
+        cannot leave a partial file at the final path, and the resulting size
+        is validated against the S3 object size (deleting the file on
+        mismatch) to catch truncated response bodies.
+
+        Args:
+            cache_file: the final path to place the index CSV at.
+        """
+        response = self.s3_client.get_object(Bucket=BUCKET_NAME, Key=INDEX_KEY)
+        expected_size = response["ContentLength"]
+        with open_atomic(cache_file, "wb") as f:
+            for chunk in response["Body"].iter_chunks(chunk_size=8 * 1024 * 1024):
+                f.write(chunk)
+        actual_size = cache_file.stat().st_size
+        if actual_size != expected_size:
+            cache_file.unlink()
+            raise OSError(
+                f"AEF index download was truncated: got {actual_size} bytes, "
+                f"expected {expected_size}"
+            )
 
     def _read_index_csv(self) -> pd.DataFrame:
         """Read the index CSV, downloading from S3 if not cached.
@@ -153,12 +184,20 @@ class GoogleSatelliteEmbeddingV1(
         """
         cache_file = self.metadata_cache_dir / "aef_index.csv"
         if not cache_file.exists():
-            response = self.s3_client.get_object(Bucket=BUCKET_NAME, Key=INDEX_KEY)
-            content = response["Body"].read()
-            with cache_file.open("wb") as f:
-                f.write(content)
+            self._download_index_csv(cache_file)
 
-        return pd.read_csv(cache_file)
+        try:
+            return pd.read_csv(cache_file)
+        except (pd.errors.EmptyDataError, pd.errors.ParserError):
+            # A pre-existing cache file may be empty or truncated (e.g. written
+            # by an older version that did not download atomically); discard it
+            # and re-download once.
+            logger.warning(
+                f"Cached AEF index at {cache_file} is corrupt; re-downloading."
+            )
+            cache_file.unlink()
+            self._download_index_csv(cache_file)
+            return pd.read_csv(cache_file)
 
     def _load_index(
         self,
@@ -168,39 +207,40 @@ class GoogleSatelliteEmbeddingV1(
         Returns:
             Tuple of (grid_index, items_by_name dict).
         """
-        if self._grid_index is not None and self._items_by_name is not None:
-            return self._grid_index, self._items_by_name
+        with self._index_lock:
+            if self._grid_index is not None and self._items_by_name is not None:
+                return self._grid_index, self._items_by_name
 
-        df = self._read_index_csv()
+            df = self._read_index_csv()
 
-        grid_index = GridIndex(GRID_SIZE)
-        items_by_name: dict[str, GoogleSatelliteEmbeddingV1Item] = {}
+            grid_index = GridIndex(GRID_SIZE)
+            items_by_name: dict[str, GoogleSatelliteEmbeddingV1Item] = {}
 
-        for _, row in df.iterrows():
-            shp = shapely.wkt.loads(row["WKT"])
+            for _, row in df.iterrows():
+                shp = shapely.wkt.loads(row["WKT"])
 
-            year = int(row["year"])
-            time_range = (
-                datetime(year, 1, 1, tzinfo=UTC),
-                datetime(year, 12, 31, 23, 59, 59, tzinfo=UTC),
-            )
+                year = int(row["year"])
+                time_range = (
+                    datetime(year, 1, 1, tzinfo=UTC),
+                    datetime(year, 12, 31, 23, 59, 59, tzinfo=UTC),
+                )
 
-            s3_path = row["path"]
-            name = s3_path.split("/")[-1].replace(".tiff", "")
+                s3_path = row["path"]
+                name = s3_path.split("/")[-1].replace(".tiff", "")
 
-            geometry = STGeometry(WGS84_PROJECTION, shp, time_range)
-            item = GoogleSatelliteEmbeddingV1Item(
-                name=name,
-                geometry=geometry,
-                s3_path=s3_path,
-            )
+                geometry = STGeometry(WGS84_PROJECTION, shp, time_range)
+                item = GoogleSatelliteEmbeddingV1Item(
+                    name=name,
+                    geometry=geometry,
+                    s3_path=s3_path,
+                )
 
-            grid_index.insert(shp.bounds, item)
-            items_by_name[name] = item
+                grid_index.insert(shp.bounds, item)
+                items_by_name[name] = item
 
-        self._grid_index = grid_index
-        self._items_by_name = items_by_name
-        return grid_index, items_by_name
+            self._grid_index = grid_index
+            self._items_by_name = items_by_name
+            return grid_index, items_by_name
 
     # --- DataSource implementation ---
 

@@ -3,6 +3,8 @@
 import io
 import pathlib
 import shutil
+import time
+from concurrent.futures import ThreadPoolExecutor
 from typing import Any
 from unittest.mock import MagicMock
 
@@ -11,6 +13,7 @@ import numpy as np
 import pytest
 import rasterio
 import shapely
+from botocore.response import StreamingBody
 from upath import UPath
 
 from rslearn.config import QueryConfig, SpaceMode
@@ -76,14 +79,25 @@ def _make_csv_content() -> bytes:
     return (header + line).encode()
 
 
+def _make_index_response(content: bytes) -> dict:
+    """Build a get_object-style response serving the given index CSV bytes."""
+    return {
+        "ContentLength": len(content),
+        "Body": StreamingBody(io.BytesIO(content), len(content)),
+    }
+
+
 def _make_mock_s3(
     test_geotiff: pathlib.Path,
 ) -> MagicMock:
     """Create a mock boto3 S3 client that serves the CSV index and test GeoTIFF."""
     # get_object serves the CSV index, and download_file copies the test GeoTIFF
     # to whatever local path the data source requests (we ignore bucket/key).
+    # A fresh response is built per call since StreamingBody is single-use.
     mock_s3 = MagicMock()
-    mock_s3.get_object.return_value = {"Body": io.BytesIO(_make_csv_content())}
+    mock_s3.get_object.side_effect = lambda **kw: _make_index_response(
+        _make_csv_content()
+    )
 
     def mock_download(bucket: str, key: str, local_path: str) -> None:
         shutil.copy(str(test_geotiff), local_path)
@@ -201,3 +215,125 @@ def test_materialize(
     )
     assert array.get_chw_array().max() == expected_value
     assert array.timestamps == [item.geometry.time_range]
+
+
+def _make_index_data_source(
+    tmp_path: pathlib.Path,
+    test_geotiff: pathlib.Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> GoogleSatelliteEmbeddingV1:
+    """Create a data source with mocked S3 for index cache tests."""
+    monkeypatch.setattr(boto3, "client", lambda *a, **kw: _make_mock_s3(test_geotiff))
+    return GoogleSatelliteEmbeddingV1(metadata_cache_dir=str(tmp_path / "cache"))
+
+
+def test_index_cache_hit_skips_download(
+    tmp_path: pathlib.Path,
+    test_geotiff: pathlib.Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A valid cached index is reused without re-downloading."""
+    data_source = _make_index_data_source(tmp_path, test_geotiff, monkeypatch)
+    data_source._read_index_csv()
+    data_source._read_index_csv()
+    assert data_source.s3_client.get_object.call_count == 1
+    # The atomic write should leave no temporary files behind.
+    cache_dir = UPath(tmp_path / "cache")
+    assert [p.name for p in cache_dir.iterdir()] == ["aef_index.csv"]
+
+
+def test_index_corrupt_cache_self_heals(
+    tmp_path: pathlib.Path,
+    test_geotiff: pathlib.Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """An empty or truncated cached index is discarded and re-downloaded."""
+    data_source = _make_index_data_source(tmp_path, test_geotiff, monkeypatch)
+    cache_dir = UPath(tmp_path / "cache")
+
+    # Empty file (e.g. a download that was killed immediately).
+    (cache_dir / "aef_index.csv").touch()
+    df = data_source._read_index_csv()
+    assert len(df) == 1
+    assert data_source.s3_client.get_object.call_count == 1
+
+
+def test_index_truncated_download_raises(
+    tmp_path: pathlib.Path,
+    test_geotiff: pathlib.Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A response body shorter than ContentLength errors and leaves no cache file."""
+    data_source = _make_index_data_source(tmp_path, test_geotiff, monkeypatch)
+
+    def truncated_response(**kwargs: Any) -> dict:
+        content = _make_csv_content()
+        response = _make_index_response(content[: len(content) // 2])
+        response["ContentLength"] = len(content)
+        return response
+
+    data_source.s3_client.get_object.side_effect = truncated_response
+    with pytest.raises(OSError, match="truncated"):
+        data_source._read_index_csv()
+    assert not (UPath(tmp_path / "cache") / "aef_index.csv").exists()
+
+    # A subsequent run with a healthy connection succeeds.
+    data_source.s3_client.get_object.side_effect = lambda **kw: _make_index_response(
+        _make_csv_content()
+    )
+    df = data_source._read_index_csv()
+    assert len(df) == 1
+
+
+def test_index_interrupted_download_leaves_no_cache_file(
+    tmp_path: pathlib.Path,
+    test_geotiff: pathlib.Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A download that dies mid-stream must not leave a file at the cache path."""
+    data_source = _make_index_data_source(tmp_path, test_geotiff, monkeypatch)
+
+    def interrupted_response(**kwargs: Any) -> dict:
+        body = MagicMock()
+        body.iter_chunks.side_effect = ConnectionError("connection reset")
+        return {"ContentLength": len(_make_csv_content()), "Body": body}
+
+    data_source.s3_client.get_object.side_effect = interrupted_response
+    with pytest.raises(ConnectionError):
+        data_source._read_index_csv()
+    assert not (UPath(tmp_path / "cache") / "aef_index.csv").exists()
+
+
+def test_index_concurrent_load_downloads_once(
+    tmp_path: pathlib.Path,
+    test_geotiff: pathlib.Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Concurrent threads loading a cold index share a single slow download.
+
+    Regression test: previously a thread could observe another thread's
+    in-progress cache write as an existing (empty) file and fail with
+    pandas.errors.EmptyDataError.
+    """
+    data_source = _make_index_data_source(tmp_path, test_geotiff, monkeypatch)
+
+    def slow_response(**kwargs: Any) -> dict:
+        content = _make_csv_content()
+        body = MagicMock()
+
+        def chunks(chunk_size: int) -> Any:
+            for i in range(0, len(content), 16):
+                time.sleep(0.002)
+                yield content[i : i + 16]
+
+        body.iter_chunks.side_effect = chunks
+        return {"ContentLength": len(content), "Body": body}
+
+    data_source.s3_client.get_object.side_effect = slow_response
+
+    with ThreadPoolExecutor(max_workers=8) as pool:
+        results = list(pool.map(lambda _: data_source._load_index(), range(8)))
+
+    assert data_source.s3_client.get_object.call_count == 1
+    for _, items_by_name in results:
+        assert len(items_by_name) == 1
