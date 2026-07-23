@@ -1,6 +1,5 @@
 """Metric output classes for non-scalar metrics."""
 
-from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from typing import Any
 
@@ -14,21 +13,20 @@ logger = get_logger(__name__)
 
 
 @dataclass
-class NonScalarMetricOutput(ABC):
+class NonScalarMetricOutput:
     """Base class for non-scalar metric outputs that need special logging.
 
     Subclasses should implement the platform-specific methods for the loggers they
     support. Unsupported loggers are skipped with a warning.
     """
 
-    @abstractmethod
     def log_to_wandb(self, name: str) -> None:
         """Log this metric to wandb.
 
         Args:
             name: the metric name
         """
-        pass
+        logger.warning("W&B logging is not implemented for metric %s", name)
 
     def log_to_mlflow(self, name: str, client: Any, run_id: str) -> None:
         """Log this metric to MLflow.

@@ -3,7 +3,32 @@
 import pytest
 import torch
 
-from rslearn.train.metrics import ConfusionMatrixMetric, ConfusionMatrixOutput
+from rslearn.train.metrics import (
+    ConfusionMatrixMetric,
+    ConfusionMatrixOutput,
+    NonScalarMetricOutput,
+)
+
+
+def test_unsupported_loggers_warn(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Test that unsupported W&B and MLflow logging behave symmetrically."""
+    import rslearn.train.metrics as metrics_module
+
+    warnings: list[tuple[object, ...]] = []
+    monkeypatch.setattr(
+        metrics_module.logger,
+        "warning",
+        lambda *args: warnings.append(args),
+    )
+
+    output = NonScalarMetricOutput()
+    output.log_to_wandb("metric")
+    output.log_to_mlflow("metric", client=object(), run_id="run-id")
+
+    assert warnings == [
+        ("W&B logging is not implemented for metric %s", "metric"),
+        ("MLflow logging is not implemented for metric %s", "metric"),
+    ]
 
 
 class TestConfusionMatrixMetric:
