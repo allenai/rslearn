@@ -42,4 +42,3 @@ def test_mlflow_config_is_not_reuploaded_on_resume(
 
     assert len(logged_configs) == expected_log_count
     assert run_id_path.read_text() == "run-id"
-
