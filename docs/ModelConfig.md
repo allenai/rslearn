@@ -755,21 +755,6 @@ trainer:
         mode: min
 ```
 
-W&B is used by default. To use a self-hosted MLflow server instead, install the
-`extra` dependencies, set `MLFLOW_TRACKING_URI` to the server URL, and configure
-Lightning's MLflow logger:
-
-```yaml
-trainer:
-  logger:
-    class_path: lightning.pytorch.loggers.MLFlowLogger
-    init_args: {}
-```
-
-Model management fills in `experiment_name` and `run_name`, records the run ID for
-resume, and logs the resolved model configuration as `config.json`. Confusion matrices
-and other supported `NonScalarMetricOutput` values are logged as MLflow artifacts.
-
 ## Using Custom Classes
 
 Each section of the model configuration file that specifies a class instantiation can
