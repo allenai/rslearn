@@ -136,10 +136,16 @@ class SaveMLflowRunIdCallback(Callback):
 
         project_dir = UPath(self.project_dir)
         project_dir.mkdir(parents=True, exist_ok=True)
-        with (project_dir / MLFLOW_ID_FNAME).open("w") as f:
+        run_id_path = project_dir / MLFLOW_ID_FNAME
+        is_resuming = False
+        if run_id_path.exists():
+            with run_id_path.open("r") as f:
+                is_resuming = f.read().strip() == run_id
+
+        with run_id_path.open("w") as f:
             f.write(run_id)
 
-        if self.config_str is not None:
+        if self.config_str is not None and not is_resuming:
             trainer.logger.experiment.log_dict(
                 run_id=run_id,
                 dictionary=json.loads(self.config_str),
