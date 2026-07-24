@@ -37,6 +37,8 @@ logger = get_logger(__name__)
 class RslearnSaveConfigCallback(SaveConfigCallback):
     """Save the CLI config even when the logger has no local log directory."""
 
+    save_to_log_dir: bool
+
     def setup(
         self,
         trainer: Trainer,
@@ -209,6 +211,8 @@ class SaveMLflowRunIdCallback(Callback):
 
 class RslearnLightningCLI(LightningCLI):
     """LightningCLI that links data.tasks to model.tasks and supports environment variables."""
+
+    save_config_callback: type[SaveConfigCallback] | None
 
     def add_arguments_to_parser(self, parser: LightningArgumentParser) -> None:
         """Link data.tasks to model.tasks and set sensible defaults.
