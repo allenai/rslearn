@@ -6,7 +6,49 @@ from typing import Any
 import pytest
 
 import rslearn.lightning_cli as lightning_cli_module
-from rslearn.lightning_cli import MLFLOW_ID_FNAME, SaveMLflowRunIdCallback
+from rslearn.lightning_cli import (
+    MLFLOW_ID_FNAME,
+    RslearnSaveConfigCallback,
+    SaveMLflowRunIdCallback,
+)
+
+
+def test_save_config_falls_back_to_default_root_dir(tmp_path: pathlib.Path) -> None:
+    """SaveConfigCallback works with remote MLflow loggers whose log_dir is None."""
+
+    class FakeParser:
+        def save(
+            self,
+            config: object,
+            path: str,
+            **kwargs: object,
+        ) -> None:
+            pathlib.Path(path).write_text("config")
+
+    class FakeStrategy:
+        def broadcast(self, value: object) -> object:
+            return value
+
+    trainer = type(
+        "Trainer",
+        (),
+        {
+            "log_dir": None,
+            "default_root_dir": str(tmp_path),
+            "is_global_zero": True,
+            "strategy": FakeStrategy(),
+        },
+    )()
+    callback = RslearnSaveConfigCallback(
+        FakeParser(),  # type: ignore[arg-type]
+        config={},
+        overwrite=True,
+    )
+
+    callback.setup(trainer, pl_module=None, stage="fit")  # type: ignore[arg-type]
+
+    assert (tmp_path / "config.yaml").read_text() == "config"
+    assert callback.already_saved
 
 
 @pytest.mark.parametrize(

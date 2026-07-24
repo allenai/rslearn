@@ -11,9 +11,14 @@ import tempfile
 import fsspec
 import jsonargparse
 import wandb
+from lightning.fabric.utilities.cloud_io import get_filesystem
 from lightning.pytorch import LightningDataModule, LightningModule, Trainer
 from lightning.pytorch.callbacks import Callback
-from lightning.pytorch.cli import LightningArgumentParser, LightningCLI
+from lightning.pytorch.cli import (
+    LightningArgumentParser,
+    LightningCLI,
+    SaveConfigCallback,
+)
 from lightning.pytorch.loggers import MLFlowLogger
 from lightning.pytorch.utilities import rank_zero_only
 from upath import UPath
@@ -27,6 +32,55 @@ WANDB_ID_FNAME = "wandb_id"
 MLFLOW_ID_FNAME = "mlflow_id"
 
 logger = get_logger(__name__)
+
+
+class RslearnSaveConfigCallback(SaveConfigCallback):
+    """Save the CLI config even when the logger has no local log directory."""
+
+    def setup(
+        self,
+        trainer: Trainer,
+        pl_module: LightningModule,
+        stage: str,
+    ) -> None:
+        """Fall back to ``default_root_dir`` when ``log_dir`` is unavailable."""
+        if self.already_saved or not self.save_to_log_dir:
+            super().setup(trainer, pl_module, stage)
+            return
+
+        log_dir = trainer.log_dir
+        if log_dir is not None:
+            super().setup(trainer, pl_module, stage)
+            return
+
+        log_dir = trainer.default_root_dir
+        config_path = os.path.join(log_dir, self.config_filename)
+        fs = get_filesystem(log_dir)
+        if not self.overwrite:
+            file_exists = fs.isfile(config_path) if trainer.is_global_zero else False
+            file_exists = trainer.strategy.broadcast(file_exists)
+            if file_exists:
+                raise RuntimeError(
+                    f"{self.__class__.__name__} expected {config_path} to NOT exist"
+                )
+
+        if trainer.is_global_zero:
+            fs.makedirs(log_dir, exist_ok=True)
+            self.parser.save(
+                self.config,
+                config_path,
+                skip_none=False,
+                overwrite=self.overwrite,
+                multifile=self.multifile,
+            )
+
+        # Let Lightning perform the save_config hook and synchronization without
+        # asking trainer.log_dir for a second time.
+        self.save_to_log_dir = False
+        try:
+            super().setup(trainer, pl_module, stage)
+        finally:
+            self.save_to_log_dir = True
 
 
 def get_cached_checkpoint(checkpoint_fname: UPath) -> str:
@@ -456,6 +510,9 @@ class RslearnLightningCLI(LightningCLI):
 
     def before_instantiate_classes(self) -> None:
         """Called before Lightning class initialization."""
+        if self.save_config_callback is SaveConfigCallback:
+            self.save_config_callback = RslearnSaveConfigCallback
+
         if not hasattr(self.config, "subcommand"):
             logger.warning(
                 "Config does not have subcommand attribute, assuming we are in run=False mode"
