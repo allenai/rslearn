@@ -51,6 +51,7 @@ class EarthDailyItem(Item):
         asset_urls: dict[str, str],
         asset_scale_offsets: dict[str, list[dict[str, float | None]]] | None = None,
         product_id: str | None = None,
+        boa_offset_applied: bool | None = None,
     ):
         """Creates a new EarthDailyItem.
 
@@ -63,11 +64,15 @@ class EarthDailyItem(Item):
                 "scale", "offset", and "nodata".
             product_id: optional Sentinel-2 product ID from STAC
                 `properties["sentinel:product_id"]`.
+            boa_offset_applied: whether the Sentinel-2 BOA offset has already been
+                applied to the COG, from STAC
+                `properties["earthsearch:boa_offset_applied"]`.
         """
         super().__init__(name, geometry)
         self.asset_urls = asset_urls
         self.asset_scale_offsets = asset_scale_offsets or {}
         self.product_id = product_id
+        self.boa_offset_applied = boa_offset_applied
 
     def serialize(self) -> dict[str, Any]:
         """Serializes the item to a JSON-encodable dictionary."""
@@ -75,6 +80,7 @@ class EarthDailyItem(Item):
         d["asset_urls"] = self.asset_urls
         d["asset_scale_offsets"] = self.asset_scale_offsets
         d["product_id"] = self.product_id
+        d["boa_offset_applied"] = self.boa_offset_applied
         return d
 
     @staticmethod
@@ -87,6 +93,7 @@ class EarthDailyItem(Item):
             asset_urls=d["asset_urls"],
             asset_scale_offsets=d.get("asset_scale_offsets") or {},
             product_id=d.get("product_id"),
+            boa_offset_applied=d.get("boa_offset_applied"),
         )
 
 
@@ -288,12 +295,22 @@ class EarthDaily(DataSource, TileStore):
                 product_id = raw_product_id
                 break
 
+        raw_boa_offset_applied = stac_item.properties.get(
+            "earthsearch:boa_offset_applied"
+        )
+        boa_offset_applied = (
+            raw_boa_offset_applied
+            if isinstance(raw_boa_offset_applied, bool)
+            else None
+        )
+
         return EarthDailyItem(
             stac_item.id,
             geom,
             asset_urls,
             asset_scale_offsets=asset_scale_offsets,
             product_id=product_id,
+            boa_offset_applied=boa_offset_applied,
         )
 
     def get_item_by_name(self, name: str) -> EarthDailyItem:
@@ -1006,6 +1023,8 @@ class Sentinel2L2A(EarthDaily):
 
         Args:
             harmonize: apply processing-baseline harmonization to reflectance values.
+                Items with `earthsearch:boa_offset_applied=true` are not modified
+                because their COG pixels have already been harmonized.
             assets: optional list of asset keys to ingest. If omitted and a LayerConfig
                 is provided via context, assets are inferred from that layer's band sets.
             cloud_cover_max: max cloud cover (%) applied in searches. If set, injects
@@ -1124,6 +1143,8 @@ class Sentinel2L2A(EarthDaily):
         self, item: EarthDailyItem, asset_key: str
     ) -> Callable[[npt.NDArray[Any]], npt.NDArray[Any]] | None:
         if not self.harmonize or asset_key in self.NON_REFLECTANCE_ASSETS:
+            return None
+        if item.boa_offset_applied is True:
             return None
         if item.name in self._harmonize_callback_cache:
             return self._harmonize_callback_cache[item.name]
