@@ -606,9 +606,7 @@ class Landsat(DirectMaterializeDataSource[LandsatItem]):
         ):
             if self.sort_by == "cloud_cover":
                 cur_items.sort(
-                    key=lambda item: (
-                        item.cloud_cover if item.cloud_cover >= 0 else 100
-                    )
+                    key=lambda item: item.cloud_cover if item.cloud_cover >= 0 else 100
                 )
             elif self.sort_by is not None:
                 raise ValueError(f"invalid sort_by setting ({self.sort_by})")

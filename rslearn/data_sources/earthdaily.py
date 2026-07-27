@@ -299,9 +299,7 @@ class EarthDaily(DataSource, TileStore):
             "earthsearch:boa_offset_applied"
         )
         boa_offset_applied = (
-            raw_boa_offset_applied
-            if isinstance(raw_boa_offset_applied, bool)
-            else None
+            raw_boa_offset_applied if isinstance(raw_boa_offset_applied, bool) else None
         )
 
         return EarthDailyItem(
