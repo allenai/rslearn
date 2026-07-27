@@ -29,6 +29,19 @@ MLFLOW_ID_FNAME = "mlflow_id"
 logger = get_logger(__name__)
 
 
+def _mlflow_logger_has_no_local_save_dir(
+    logger_config: jsonargparse.Namespace,
+) -> bool:
+    """Return whether Lightning's MLflow logger will expose no save directory."""
+    if logger_config.class_path.rsplit(".", 1)[-1] != "MLFlowLogger":
+        return False
+
+    tracking_uri = logger_config.init_args.get("tracking_uri") or os.getenv(
+        "MLFLOW_TRACKING_URI"
+    )
+    return bool(tracking_uri) and not str(tracking_uri).startswith("file:")
+
+
 def get_cached_checkpoint(checkpoint_fname: UPath) -> str:
     """Get a local cached version of the specified checkpoint.
 
@@ -474,6 +487,15 @@ class RslearnLightningCLI(LightningCLI):
 
         if c.management_dir:
             self.enable_project_management(c.management_dir)
+
+        if c.trainer.logger and _mlflow_logger_has_no_local_save_dir(c.trainer.logger):
+            # SaveConfigCallback asserts that trainer.log_dir is not None, but
+            # MLFlowLogger has no save directory when using a remote tracking URI.
+            logger.warning(
+                "disabling local config saving because the remote MLflow logger "
+                "does not provide a log directory"
+            )
+            self.save_config_callback = None  # type: ignore[has-type]
 
 
 def model_handler() -> None:
