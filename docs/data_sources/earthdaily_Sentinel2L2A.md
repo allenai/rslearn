@@ -77,11 +77,15 @@ known archive gaps, see [earthdaily.Sentinel2C1L2A](earthdaily_Sentinel2C1L2A.md
 
 ### Harmonization
 
-Harmonization first tries to build the callback from Sentinel-2 metadata XML
-(`product_metadata`) using `get_harmonize_callback(...)` when that asset is present.
+When `harmonize=true`, rslearn first checks the STAC
+`earthsearch:boa_offset_applied` property. If it is `true`, the Earth Search COG has
+already been harmonized and no further offset is applied. Otherwise, harmonization
+tries to build the callback from Sentinel-2 metadata XML (`product_metadata`) using
+`get_harmonize_callback(...)`.
 
 If metadata is missing or cannot be read while `harmonize=true`, rslearn raises
-that error instead of silently skipping harmonization.
+that error instead of silently skipping harmonization, unless the STAC property
+already confirms that the offset was applied.
 
 If metadata XML is available but does not itself indicate whether an offset is
 present, rslearn falls back to the processing baseline encoded in STAC
