@@ -120,16 +120,16 @@ from upath import UPath
 ds_path = UPath("./bitemporal_dataset")
 windows = Dataset(ds_path).load_windows()
 for window in tqdm.tqdm(windows):
-    # Create a GeoJSON feature with the category property. The geometry doesn't
-    # matter for ClassificationTask, so we just use the window geometry.
-    feat = Feature(
-        window.get_geometry(),
-        {"category": "old_then_new"},
-    )
-    # Then write it to the label layer via Window.open_layer_writer.
-    with window.open_layer_writer("label") as writer:
-        writer.write_vector(GeojsonVectorFormat(), [feat])
-    window.mark_layer_completed("label")
+  # Create a GeoJSON feature with the category property. The geometry doesn't
+  # matter for ClassificationTask, so we just use the window geometry.
+  feat = Feature(
+    window.get_geometry(),
+    {"category": "old_then_new"},
+  )
+  # Then write it to the label layer via window.data.open_layer_writer.
+  with window.data.open_layer_writer("label") as writer:
+    writer.write_vector(GeojsonVectorFormat(), [feat])
+  window.mark_layer_completed("label")
 ```
 
 ## Define the Model Architecture
@@ -273,25 +273,25 @@ from rslearn.train.model_context import RasterImage
 from rslearn.train.transforms.transform import Transform
 
 class ReverseImageOrder(Transform):
-    def forward(
-        self, input_dict: dict, target_dict: dict
-    ) -> tuple[dict, dict]:
-        # Randomly decide whether to reverse the order.
-        if random.random() < 0.5:
-            # Do nothing.
-            return input_dict, target_dict
+  def forward(
+    self, input_dict: dict, target_dict: dict
+  ) -> tuple[dict, dict]:
+    # Randomly decide whether to reverse the order.
+    if random.random() < 0.5:
+      # Do nothing.
+      return input_dict, target_dict
 
-        # input_dict["sentinel2_l2a"] is a RasterImage with CTHW tensor where
-        # T=2. Flip the time dimension to reverse old/new order.
-        ri = input_dict["sentinel2_l2a"]
-        input_dict["sentinel2_l2a"] = RasterImage(
-            image=ri.image[:, [1, 0], :, :],
-            timestamps=list(reversed(ri.timestamps)) if ri.timestamps else None,
-        )
+    # input_dict["sentinel2_l2a"] is a RasterImage with CTHW tensor where
+    # T=2. Flip the time dimension to reverse old/new order.
+    ri = input_dict["sentinel2_l2a"]
+    input_dict["sentinel2_l2a"] = RasterImage(
+      image=ri.image[:, [1, 0], :, :],
+      timestamps=list(reversed(ri.timestamps)) if ri.timestamps else None,
+    )
 
-        # We also reverse the classification label.
-        target_dict["class"] = torch.tensor(1, dtype=torch.int64)
-        return input_dict, target_dict
+    # We also reverse the classification label.
+    target_dict["class"] = torch.tensor(1, dtype=torch.int64)
+    return input_dict, target_dict
 ```
 
 The input dict contains the passthrough inputs, while the target dict is computed by
@@ -314,10 +314,10 @@ from rslearn.train.model_context import RasterImage
 from rslearn.train.transforms.transform import Transform
 
 class ReverseImageOrder(Transform):
-    # ...
+  # ... Copy the class body from above.
 
 if __name__ == "__main__":
-    main()
+  main()
 ```
 
 Finally, we can train the model:

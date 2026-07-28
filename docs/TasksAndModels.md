@@ -634,14 +634,14 @@ ModelContext is defined as follows in `rslearn.train.model_context`:
 
 ```python
 class ModelContext:
-    """Context to pass to all model components."""
+  """Context to pass to all model components."""
 
-    # One input dict per example in the batch.
-    inputs: list[dict[str, torch.Tensor]]
-    # One SampleMetadata per example in the batch.
-    metadatas: list[SampleMetadata]
-    # Arbitrary dict that components can add to.
-    context_dict: dict[str, Any] = field(default_factory=lambda: {})
+  # One input dict per example in the batch.
+  inputs: list[dict[str, torch.Tensor]]
+  # One SampleMetadata per example in the batch.
+  metadatas: list[SampleMetadata]
+  # Arbitrary dict that components can add to.
+  context_dict: dict[str, Any] = field(default_factory=lambda: {})
 ```
 
 #### Intermediate Components
@@ -687,10 +687,10 @@ The Predictor provides a forward function with this signature:
 
 ```python
 def forward(
-    self,
-    intermediates: Any,
-    context: ModelContext,
-    targets: list[dict[str, torch.Tensor]] | None = None,
+  self,
+  intermediates: Any,
+  context: ModelContext,
+  targets: list[dict[str, torch.Tensor]] | None = None,
 ) -> ModelOutput:
 ```
 
@@ -701,17 +701,17 @@ ModelOutput is defined as follows in `rslearn.train.model_context`:
 
 ```python
 class ModelOutput:
-    """The output from the Predictor.
+  """The output from the Predictor.
 
-    Args:
-        outputs: output compatible with the configured Task.
-        loss_dict: map from loss names to scalar tensors.
-        metadata: arbitrary dict that can be used to store other outputs.
-    """
+  Args:
+    outputs: output compatible with the configured Task.
+    loss_dict: map from loss names to scalar tensors.
+    metadata: arbitrary dict that can be used to store other outputs.
+  """
 
-    outputs: Iterable[Any]
-    loss_dict: dict[str, torch.Tensor]
-    metadata: dict[str, Any] = field(default_factory=lambda: {})
+  outputs: Iterable[Any]
+  loss_dict: dict[str, torch.Tensor]
+  metadata: dict[str, Any] = field(default_factory=lambda: {})
 ```
 
 ## Feature Extractors

@@ -167,102 +167,102 @@ CSV_PATH = "docs/examples/FindStadiums/stadiums.csv"
 WINDOW_SIZE = 256
 RESOLUTION = 10
 TIME_RANGE = (
-    datetime(2025, 6, 1, tzinfo=UTC),
-    datetime(2025, 8, 30, tzinfo=UTC),
+  datetime(2025, 6, 1, tzinfo=UTC),
+  datetime(2025, 8, 30, tzinfo=UTC),
 )
 VAL_RATIO = 0.2
 
 # We assign nearby points to the same split based on a coarse geographic region.
 def location_to_split(lon: float, lat: float) -> str:
-    region = f"{int(lon // 2)}_{int(lat // 2)}"
-    h = int(hashlib.sha256(region.encode()).hexdigest(), 16)
-    return "val" if (h % 100) < VAL_RATIO * 100 else "train"
+  region = f"{int(lon // 2)}_{int(lat // 2)}"
+  h = int(hashlib.sha256(region.encode()).hexdigest(), 16)
+  return "val" if (h % 100) < VAL_RATIO * 100 else "train"
 
 # Stadium names are not unique, so include the team in each window name.
 def get_window_name(row: dict[str, str]) -> str:
-    value = f"{row['stadium']}_{row['team']}"
-    return re.sub(r"[^A-Za-z0-9]+", "_", value).strip("_")
+  value = f"{row['stadium']}_{row['team']}"
+  return re.sub(r"[^A-Za-z0-9]+", "_", value).strip("_")
 
 # Read the points in the CSV.
 # The columns include "state", "longitude", "latitude", and "stadium".
 with open(CSV_PATH) as f:
-    rows = [
-        row
-        for row in csv.DictReader(f)
-        if row["state"].strip() not in {"WA", "Washington"}
-    ]
+  rows = [
+    row
+    for row in csv.DictReader(f)
+    if row["state"].strip() not in {"WA", "Washington"}
+  ]
 
 # Initialize a Dataset object that represents the entire rslearn dataset.
 dataset = Dataset(UPath(os.environ["DATASET_PATH"]))
 
 split_counts: dict[str, int] = {}
 for row in tqdm.tqdm(rows):
-    # For each row in the CSV, start by extracting the columns we want.
-    lon = float(row["longitude"])
-    lat = float(row["latitude"])
-    window_name = get_window_name(row)
+  # For each row in the CSV, start by extracting the columns we want.
+  lon = float(row["longitude"])
+  lat = float(row["latitude"])
+  window_name = get_window_name(row)
 
-    # Assign nearby stadiums to the same train or val split.
-    split = location_to_split(lon, lat)
-    split_counts[split] = split_counts.get(split, 0) + 1
+  # Assign nearby stadiums to the same train or val split.
+  split = location_to_split(lon, lat)
+  split_counts[split] = split_counts.get(split, 0) + 1
 
-    # OlmoEarth expects inputs to be at 10 m/pixel in UTM projection. We first
-    # find the appropriate UTM projection for this location. In addition to the
-    # CRS, the Projection also specifies the m/pixel resolution, which is
-    # RESOLUTION=10 here.
-    projection = get_utm_ups_projection(lon, lat, RESOLUTION, -RESOLUTION)
+  # OlmoEarth expects inputs to be at 10 m/pixel in UTM projection. We first
+  # find the appropriate UTM projection for this location. In addition to the
+  # CRS, the Projection also specifies the m/pixel resolution, which is
+  # RESOLUTION=10 here.
+  projection = get_utm_ups_projection(lon, lat, RESOLUTION, -RESOLUTION)
 
-    # Now convert the lon/lat to pixel coordinates in that projection. (Pixel
-    # coordinates are just CRS coordinates divided by the resolution.) The
-    # STGeometry specifies the Projection (CRS + resolution), a shapely geometry
-    # in pixel coordinates, and an optional time range (omitted here).
-    src_geom = STGeometry(WGS84_PROJECTION, shapely.Point(lon, lat), None)
-    # STGeometry.to_projection re-projects the geometry to another projection by
-    # transforming each vertex. dst_geom.shp is in pixel coordinates in the
-    # target projection.
-    dst_geom = src_geom.to_projection(projection)
-    cx, cy = int(dst_geom.shp.x), int(dst_geom.shp.y)
+  # Now convert the lon/lat to pixel coordinates in that projection. (Pixel
+  # coordinates are just CRS coordinates divided by the resolution.) The
+  # STGeometry specifies the Projection (CRS + resolution), a shapely geometry
+  # in pixel coordinates, and an optional time range (omitted here).
+  src_geom = STGeometry(WGS84_PROJECTION, shapely.Point(lon, lat), None)
+  # STGeometry.to_projection re-projects the geometry to another projection by
+  # transforming each vertex. dst_geom.shp is in pixel coordinates in the
+  # target projection.
+  dst_geom = src_geom.to_projection(projection)
+  cx, cy = int(dst_geom.shp.x), int(dst_geom.shp.y)
 
-    # Compute bounds so that the stadium will be at the center.
-    bounds = (cx - WINDOW_SIZE // 2, cy - WINDOW_SIZE // 2, cx + WINDOW_SIZE // 2, cy + WINDOW_SIZE // 2)
+  # Compute bounds so that the stadium will be at the center.
+  bounds = (cx - WINDOW_SIZE // 2, cy - WINDOW_SIZE // 2, cx + WINDOW_SIZE // 2, cy + WINDOW_SIZE // 2)
 
-    # Create the window. The Window object represents one rslearn window
-    # (spatiotemporal bounding box). When we call Window.save, it creates a new
-    # folder corresponding to the window in
-    # {DATASET_PATH}/windows/{group_name}/{window_name}, and writes the
-    # projection, bounds, time range, and other details to metadata.json in that
-    # folder.
-    window = Window(
-        storage=dataset.storage,
-        group="default",
-        name=window_name,
-        projection=projection,
-        bounds=bounds,
-        time_range=TIME_RANGE,
-        options={"split": split},
-        data_factory=dataset.window_data_storage_factory,
+  # Create the window. The Window object represents one rslearn window
+  # (spatiotemporal bounding box). When we call Window.save, it creates a new
+  # folder corresponding to the window in
+  # {DATASET_PATH}/windows/{group_name}/{window_name}, and writes the
+  # projection, bounds, time range, and other details to metadata.json in that
+  # folder.
+  window = Window(
+    storage=dataset.storage,
+    group="default",
+    name=window_name,
+    projection=projection,
+    bounds=bounds,
+    time_range=TIME_RANGE,
+    options={"split": split},
+    data_factory=dataset.window_data_storage_factory,
+  )
+  window.save()
+
+  # Most of the label is "background" (2).
+  label = np.full((1, WINDOW_SIZE, WINDOW_SIZE), 2, dtype=np.uint8)
+  mid = WINDOW_SIZE // 2
+  # Create a 40x40 NODATA (0) buffer in the center.
+  label[:, mid - 20 : mid + 20, mid - 20 : mid + 20] = 0
+  # And set the middle 5x5 to "stadium" (1).
+  label[:, mid - 2 : mid + 3, mid - 2 : mid + 3] = 1
+
+  # Finally, write the label raster through the window's configured data
+  # storage. The projection and bounds must describe the array being written.
+  with window.data.open_layer_writer("label") as writer:
+    writer.write_raster(
+      ["label"],
+      GeotiffRasterFormat(),
+      projection,
+      bounds,
+      RasterArray(chw_array=label),
     )
-    window.save()
-
-    # Most of the label is "background" (2).
-    label = np.full((1, WINDOW_SIZE, WINDOW_SIZE), 2, dtype=np.uint8)
-    mid = WINDOW_SIZE // 2
-    # Create a 40x40 NODATA (0) buffer in the center.
-    label[:, mid - 20 : mid + 20, mid - 20 : mid + 20] = 0
-    # And set the middle 5x5 to "stadium" (1).
-    label[:, mid - 2 : mid + 3, mid - 2 : mid + 3] = 1
-
-    # Finally, write the label raster through the window's configured data
-    # storage. The projection and bounds must describe the array being written.
-    with window.data.open_layer_writer("label") as writer:
-        writer.write_raster(
-            ["label"],
-            GeotiffRasterFormat(),
-            projection,
-            bounds,
-            RasterArray(chw_array=label),
-        )
-    window.mark_layer_completed("label")
+  window.mark_layer_completed("label")
 
 print(f"Done: {split_counts}")
 ```

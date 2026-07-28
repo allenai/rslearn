@@ -76,7 +76,9 @@ markdown_extensions:
   - pymdownx.snippets
   - pymdownx.superfences
 
-# These helper README files sit alongside example data assets and are not pages.
+# The BitemporalSentinel2 data README sits alongside example data assets and is not a page.
+# ProgrammaticWindows.md serves as a redirect for any pre-existing links to
+# https://github.com/allenai/rslearn/blob/master/docs/examples/ProgrammaticWindows.md
 exclude_docs: |
   examples/BitemporalSentinel2/README.md
   examples/ProgrammaticWindows.md

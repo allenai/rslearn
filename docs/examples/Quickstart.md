@@ -105,11 +105,11 @@ dataset = Dataset(path=UPath(os.environ["DATASET_PATH"]))
 best_window_name = None
 best_distance = None
 for window in dataset.load_windows(workers=32):
-    shp = window.get_geometry().to_projection(WGS84_PROJECTION).shp
-    distance = shp.distance(downtown_seattle)
-    if best_distance is None or distance < best_distance:
-        best_window_name = window.name
-        best_distance = distance
+  shp = window.get_geometry().to_projection(WGS84_PROJECTION).shp
+  distance = shp.distance(downtown_seattle)
+  if best_distance is None or distance < best_distance:
+    best_window_name = window.name
+    best_distance = distance
 
 print(best_window_name)
 ```
@@ -430,14 +430,14 @@ ds_path = UPath(os.environ["DATASET_PATH"])
 dataset = Dataset(ds_path)
 windows = dataset.load_windows(show_progress=True, workers=32)
 for window in tqdm.tqdm(windows):
-    if hashlib.sha256(window.name.encode()).hexdigest()[0] in ["0", "1"]:
-        split = "val"
-    else:
-        split = "train"
-    if "split" in window.options and window.options["split"] == split:
-        continue
-    window.options["split"] = split
-    window.save()
+  if hashlib.sha256(window.name.encode()).hexdigest()[0] in ["0", "1"]:
+    split = "val"
+  else:
+    split = "train"
+  if "split" in window.options and window.options["split"] == split:
+    continue
+  window.options["split"] = split
+  window.save()
 ```
 
 Now we can update the model configuration file to use these splits:

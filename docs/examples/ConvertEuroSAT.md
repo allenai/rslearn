@@ -62,61 +62,61 @@ from rslearn.dataset import Dataset, Window
 from rslearn.utils.feature import Feature
 from rslearn.utils.raster_array import RasterArray
 from rslearn.utils.raster_format import (
-    GeotiffRasterFormat,
-    get_raster_projection_and_bounds,
+  GeotiffRasterFormat,
+  get_raster_projection_and_bounds,
 )
 from rslearn.utils.vector_format import GeojsonVectorFormat
 
 source_path = UPath("./EuroSAT_MS")
 dataset = Dataset(UPath("./dataset"))
 examples = [
-    (tif_path, category_path.name)
-    for category_path in source_path.iterdir()
-    for tif_path in category_path.iterdir()
-    if tif_path.suffix.lower() in {".tif", ".tiff"}
+  (tif_path, category_path.name)
+  for category_path in source_path.iterdir()
+  for tif_path in category_path.iterdir()
+  if tif_path.suffix.lower() in {".tif", ".tiff"}
 ]
 
 sentinel2_bands = [
-    "B01", "B02", "B03", "B04", "B05", "B06", "B07",
-    "B08", "B09", "B10", "B11", "B12", "B8A",
+  "B01", "B02", "B03", "B04", "B05", "B06", "B07",
+  "B08", "B09", "B10", "B11", "B12", "B8A",
 ]
 for tif_path, category in tqdm.tqdm(examples):
-    with rasterio.open(tif_path) as source:
-        projection, bounds = get_raster_projection_and_bounds(source)
-        array = source.read()
+  with rasterio.open(tif_path) as source:
+    projection, bounds = get_raster_projection_and_bounds(source)
+    array = source.read()
 
-    window_name = tif_path.stem
-    digest = hashlib.sha256(window_name.encode()).hexdigest()
-    split = "val" if digest[0] in {"0", "1", "2"} else "train"
-    window = Window(
-        storage=dataset.storage,
-        group="default",
-        name=window_name,
-        projection=projection,
-        bounds=bounds,
-        time_range=(
-            datetime(2018, 1, 1, tzinfo=UTC),
-            datetime(2019, 1, 1, tzinfo=UTC),
-        ),
-        options={"split": split},
-        data_factory=dataset.window_data_storage_factory,
+  window_name = tif_path.stem
+  digest = hashlib.sha256(window_name.encode()).hexdigest()
+  split = "val" if digest[0] in {"0", "1", "2"} else "train"
+  window = Window(
+    storage=dataset.storage,
+    group="default",
+    name=window_name,
+    projection=projection,
+    bounds=bounds,
+    time_range=(
+      datetime(2018, 1, 1, tzinfo=UTC),
+      datetime(2019, 1, 1, tzinfo=UTC),
+    ),
+    options={"split": split},
+    data_factory=dataset.window_data_storage_factory,
+  )
+  window.save()
+
+  with window.data.open_layer_writer("sentinel2") as writer:
+    writer.write_raster(
+      sentinel2_bands,
+      GeotiffRasterFormat(),
+      projection,
+      bounds,
+      RasterArray(chw_array=array),
     )
-    window.save()
+  window.mark_layer_completed("sentinel2")
 
-    with window.data.open_layer_writer("sentinel2") as writer:
-        writer.write_raster(
-            sentinel2_bands,
-            GeotiffRasterFormat(),
-            projection,
-            bounds,
-            RasterArray(chw_array=array),
-        )
-    window.mark_layer_completed("sentinel2")
-
-    feature = Feature(window.get_geometry(), {"category": category})
-    with window.data.open_layer_writer("label") as writer:
-        writer.write_vector(GeojsonVectorFormat(), [feature])
-    window.mark_layer_completed("label")
+  feature = Feature(window.get_geometry(), {"category": category})
+  with window.data.open_layer_writer("label") as writer:
+    writer.write_vector(GeojsonVectorFormat(), [feature])
+  window.mark_layer_completed("label")
 ```
 
 ## Fine-tune OlmoEarth

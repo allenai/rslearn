@@ -53,10 +53,10 @@ import os
 import random
 ds_path = os.environ["DATASET_PATH"]
 with open(os.path.join(ds_path, "source_data/all/latest.geojson")) as f:
-    feature_collection = json.load(f)
+  feature_collection = json.load(f)
 feature_collection["features"] = random.sample(feature_collection["features"], 100)
 with open(os.path.join(ds_path, "source_data/subset/latest.geojson"), "w") as f:
-    json.dump(feature_collection, f)
+  json.dump(feature_collection, f)
 ```
 
 Now we can use the `dataset add_windows` command to create the windows.
@@ -155,14 +155,14 @@ ds_path = UPath(os.environ["DATASET_PATH"])
 dataset = Dataset(ds_path)
 windows = dataset.load_windows(show_progress=True, workers=32)
 for window in tqdm.tqdm(windows):
-    if hashlib.sha256(window.name.encode()).hexdigest()[0] in ["0", "1"]:
-        split = "val"
-    else:
-        split = "train"
-    if "split" in window.options and window.options["split"] == split:
-        continue
-    window.options["split"] = split
-    window.save()
+  if hashlib.sha256(window.name.encode()).hexdigest()[0] in ["0", "1"]:
+    split = "val"
+  else:
+    split = "train"
+  if "split" in window.options and window.options["split"] == split:
+    continue
+  window.options["split"] = split
+  window.save()
 ```
 
 Here is the full model configuration file, the comments walk through what each part is

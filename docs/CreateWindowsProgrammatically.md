@@ -68,8 +68,8 @@ window = Window(
     center_y + 256,
   ),
   time_range=(
-      datetime(2024, 6, 1, tzinfo=UTC),
-      datetime(2024, 9, 1, tzinfo=UTC),
+    datetime(2024, 6, 1, tzinfo=UTC),
+    datetime(2024, 9, 1, tzinfo=UTC),
   ),
   data_factory=dataset.window_data_storage_factory,
 )
@@ -137,38 +137,38 @@ from rslearn.utils.geometry import STGeometry
 from rslearn.utils.get_utm_ups_crs import get_utm_ups_projection
 
 with open("regions.geojson") as f:
-    feature_collection = json.load(f)
+  feature_collection = json.load(f)
 
 dataset = Dataset(UPath("./dataset"))
 for feature_data in feature_collection["features"]:
-    properties = feature_data["properties"]
-    shape = shapely.geometry.shape(feature_data["geometry"])
-    geometry = STGeometry(WGS84_PROJECTION, shape, None)
+  properties = feature_data["properties"]
+  shape = shapely.geometry.shape(feature_data["geometry"])
+  geometry = STGeometry(WGS84_PROJECTION, shape, None)
 
-    # Similar to the single window example, we use the UTM projection covering
-    # this location at 10 m/pixel.
-    centroid = shape.centroid
-    projection = get_utm_ups_projection(centroid.x, centroid.y, 10, -10)
+  # Similar to the single window example, we use the UTM projection covering
+  # this location at 10 m/pixel.
+  centroid = shape.centroid
+  projection = get_utm_ups_projection(centroid.x, centroid.y, 10, -10)
 
-    # Then we project the polygon to pixel coordinates and get its bounds.
-    projected_geometry = geometry.to_projection(projection)
-    bounds = tuple(int(value) for value in projected_geometry.shp.bounds)
-    time_range = (
-        datetime.fromisoformat(properties["start_time"]),
-        datetime.fromisoformat(properties["end_time"]),
-    )
+  # Then we project the polygon to pixel coordinates and get its bounds.
+  projected_geometry = geometry.to_projection(projection)
+  bounds = tuple(int(value) for value in projected_geometry.shp.bounds)
+  time_range = (
+    datetime.fromisoformat(properties["start_time"]),
+    datetime.fromisoformat(properties["end_time"]),
+  )
 
-    window = Window(
-      storage=dataset.storage,
-      group="default",
-      name=properties["name"],
-      projection=projection,
-      bounds=bounds,
-      time_range=time_range,
-      options={"split": properties["split"]},
-      data_factory=dataset.window_data_storage_factory,
-    )
-    window.save()
+  window = Window(
+    storage=dataset.storage,
+    group="default",
+    name=properties["name"],
+    projection=projection,
+    bounds=bounds,
+    time_range=time_range,
+    options={"split": properties["split"]},
+    data_factory=dataset.window_data_storage_factory,
+  )
+  window.save()
 ```
 
 Above, we tag the windows with a `split` key. Later, the model configuration can

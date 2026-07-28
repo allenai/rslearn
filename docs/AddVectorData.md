@@ -85,7 +85,7 @@ WINDOW_SIZE = 256
 dataset = Dataset(UPath("./dataset"))
 
 with open("points.csv") as f:
-    rows = list(csv.DictReader(f))
+  rows = list(csv.DictReader(f))
 
 for index, row in enumerate(rows):
   # First, we find the UTM CRS that is appropriate for each point. The returned

@@ -101,14 +101,14 @@ ds_path = UPath("./dataset")
 dataset = Dataset(ds_path)
 windows = dataset.load_windows(show_progress=True, workers=32)
 for window in tqdm.tqdm(windows):
-    if hashlib.sha256(window.name.encode()).hexdigest()[0] in ["0", "1"]:
-        split = "val"
-    else:
-        split = "train"
-    if "split" in window.options and window.options["split"] == split:
-        continue
-    window.options["split"] = split
-    window.save()
+  if hashlib.sha256(window.name.encode()).hexdigest()[0] in ["0", "1"]:
+    split = "val"
+  else:
+    split = "train"
+  if "split" in window.options and window.options["split"] == split:
+    continue
+  window.options["split"] = split
+  window.save()
 ```
 
 ## Fine-tune the Model

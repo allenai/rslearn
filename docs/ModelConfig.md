@@ -573,13 +573,13 @@ Here is a summary of all of the options available in the SplitConfig.
           # number of training windows, since the weighted sampling means we
           # will not see each window on each epoch.
           num_samples: 1000
-      # By default (patch_size=null), data for the entire window bounds is read.
+      # By default (crop_size=null), data for the entire window bounds is read.
       # This can be cropped using transforms, but if a random crop is desired,
       # it is more efficient to crop it with this option, since this way the
       # cropping will happen when reading GeoTIFFs. However, setting it here is
       # less flexible, since it only supports random cropping.
-      patch_size: 128
-      # For validation, testing, and prediction, patch_size can be combined with
+      crop_size: 128
+      # For validation, testing, and prediction, crop_size can be combined with
       # load_all_crops to perform sliding window inference. For training, it
       # should usually be left false so that each training epoch sees a
       # different crop.
@@ -619,8 +619,8 @@ model:
         encoder:
           - class_path: rslearn.models.olmoearth_pretrain.model.OlmoEarth
             init_args:
-              forward_kwargs:
-                patch_size: 4
+              model_id: OLMOEARTH_V1_BASE
+              patch_size: 4
         decoder:
           - class_path: rslearn.models.faster_rcnn.FasterRCNN
             init_args:
@@ -646,20 +646,23 @@ data:
       init_args:
         property_name: "category"
         classes: ["unknown", "class1", "class2"]
-    train_configs:
-      # Flip the images and boxes.
-      - class_path: rslearn.train.transforms.flip.Flip
-        # This must match the name of the input defined above.
-        image_selectors: ["sentinel2_l2a"]
-        # This tells Flip to also flip boxes in the target dict.
-        box_selectors: ["targets/"]
-      # Copy the sentinel2_l2a image to the "image" key since, while OlmoEarth
-      # model expects it under "sentinel2_l2a", Faster R-CNN and the task
-      # visualization will look for it under "image".
-      - class_path: rslearn.train.transforms.concatenate.Concatenate
-        selections:
-          sentinel2_l2a: []
-        output_selector: image
+    train_config:
+      transforms:
+        # Flip the images and boxes.
+        - class_path: rslearn.train.transforms.flip.Flip
+          init_args:
+            # This must match the name of the input defined above.
+            image_selectors: ["sentinel2_l2a"]
+            # This tells Flip to also flip boxes in the target dict.
+            box_selectors: ["targets/"]
+        # Copy the sentinel2_l2a image to the "image" key since, while OlmoEarth
+        # model expects it under "sentinel2_l2a", Faster R-CNN and the task
+        # visualization will look for it under "image".
+        - class_path: rslearn.train.transforms.concatenate.Concatenate
+          init_args:
+            selections:
+              sentinel2_l2a: []
+            output_selector: image
 ```
 
 The selectors in the transforms refer to keys under the input or target dicts. A
@@ -776,6 +779,8 @@ be changed to instantiate a custom class.
 For example, you could develop a new optimizer class:
 
 ```python
+from dataclasses import asdict, dataclass
+
 import lightning as L
 import torch.optim
 from rslearn.train.optimizer import OptimizerFactory
@@ -783,18 +788,18 @@ from torch.optim import Optimizer
 
 @dataclass
 class Adadelta(OptimizerFactory):
-    """Factory for Adadelta optimizer."""
+  """Factory for Adadelta optimizer."""
 
-    lr: float = 0.001
-    rho: float | None = None
-    eps: float | None = None
-    weight_decay: float | None = None
+  lr: float = 0.001
+  rho: float | None = None
+  eps: float | None = None
+  weight_decay: float | None = None
 
-    def build(self, lm: L.LightningModule) -> Optimizer:
-        """Build the Adadelta optimizer."""
-        params = [p for p in lm.parameters() if p.requires_grad]
-        kwargs = {k: v for k, v in asdict(self).items() if v is not None}
-        return torch.optim.Adadelta(params, **kwargs)
+  def build(self, lm: L.LightningModule) -> Optimizer:
+    """Build the Adadelta optimizer."""
+    params = [p for p in lm.parameters() if p.requires_grad]
+    kwargs = {k: v for k, v in asdict(self).items() if v is not None}
+    return torch.optim.Adadelta(params, **kwargs)
 
 ```
 
