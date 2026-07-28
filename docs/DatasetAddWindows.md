@@ -1,11 +1,11 @@
-## Create Windows
+# Create Windows via CLI
 
 The `rslearn dataset add_windows` command creates windows in an rslearn dataset from the
 command-line interface. Windows can be specified either by a bounding box or by a vector
 file (e.g. GeoJSON, Shapefile).
 
-For more flexibility, see [ProgrammaticWindows](examples/ProgrammaticWindows.md) for
-creating windows programmatically via the Python API.
+For per-feature time ranges, window metadata, or other custom logic, see
+[Create Windows Programmatically](CreateWindowsProgrammatically.md).
 
 ## Basic Usage
 
@@ -90,7 +90,7 @@ bounding box. These options change that behavior.
 
 | Argument | Default | Description |
 |----------|---------|-------------|
-| `--grid_size` | None | Instead of one window per geometry, tile the geometry's bounding box into a grid of this cell size (in pixels) and create one window per grid cell that intersects the geometry. |
+| `--grid_size` | None | Instead of one window per geometry, tile the geometry's bounding box into a grid of this cell size (in pixels). Every cell in the bounding box is created; cells are not filtered by intersection with the original geometry. |
 | `--window_size` | None | Instead of using the geometry's bounding box, create a fixed-size window (in pixels) centered at the centroid of each geometry. |
 
 Only one of `--grid_size` and `--window_size` can be specified.

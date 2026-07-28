@@ -84,25 +84,25 @@ Here is an example with `SingleTaskModel`, for segmentation:
       class_path: rslearn.models.singletask.SingleTaskModel
       init_args:
         encoder:
-          # This section specifies a list of model components that should extract one
-          # or more feature maps from the inputs. The components will be applied
-          # sequentially.
+          # This section specifies a list of model components that should
+          # extract one or more feature maps from the inputs. The components
+          # will be applied sequentially.
           - class_path: rslearn.models.satlaspretrain.SatlasPretrain
             init_args:
               model_identifier: "Sentinel2_SwinB_SI_RGB"
         decoder:
-          # This section specifies a list of model components for the decoder. The
-          # final components in the list should compute a loss that can be optimized.
-          # The UNetDecoder inputs a set of multi-scale feature maps, and produces
-          # logits at the input resolution.
+          # This section specifies a list of model components for the decoder.
+          # The final components in the list should compute a loss that can be
+          # optimized. The UNetDecoder inputs a set of multi-scale feature maps,
+          # and produces logits at the input resolution.
           - class_path: rslearn.models.unet.UNetDecoder
               init_args:
               in_channels: [[4, 128], [8, 256], [16, 512], [32, 1024]]
               out_channels: 2
               conv_layers_per_resolution: 2
-          # The SegmentationHead computes the cross entropy loss between the logits and
-          # the labels at each pixel. It also returns the output probabilities at each
-          # pixel.
+          # The SegmentationHead computes the cross entropy loss between the
+          # logits and the labels at each pixel. It also returns the output
+          # probabilities at each pixel.
           - class_path: rslearn.train.tasks.segmentation.SegmentationHead
 ```
 
@@ -118,10 +118,10 @@ Here is an example with `MultiTaskModel`, for per-pixel regression + segmentatio
             init_args:
               model_identifier: "Sentinel2_SwinB_SI_RGB"
         decoders:
-          # The decoder section now has a separate list of model components for each
-          # prediction task. The keys for each decoder section are sub-task names which
-          # can be arbitrary, but must match up with corresponding keys in MultiTask in
-          # the data: section.
+          # The decoder section now has a separate list of model components for
+          # each prediction task. The keys for each decoder section are sub-task
+          # names which can be arbitrary, but must match up with corresponding
+          # keys in MultiTask in the data: section.
           regress:
             - class_path: rslearn.models.unet.UNetDecoder
                 init_args:
@@ -179,9 +179,11 @@ Here is an example of using PlateauScheduler:
       init_args:
         # Multiply the learning rate by this factor on plateau.
         factor: 0.2
-        # Number of epochs without improvement after which learning rate should be reduced.
+        # Number of epochs without improvement after which learning rate should
+        # be reduced.
         patience: 2
-        # Number of epochs to wait before resuming normal operation after learning rate has been reduced.
+        # Number of epochs to wait before resuming normal operation after
+        # learning rate has been reduced.
         cooldown: 10
 ```
 
@@ -267,7 +269,8 @@ data:
   class_path: rslearn.train.data_module.RslearnDataModule
   init_args:
     inputs:
-      # Specify DataInputs that define how to load data from the rslearn dataset.
+      # Specify DataInputs that define how to load data from the rslearn
+      # dataset.
     task:
       # The Task object that defines many parts of the supervised training task.
     path: "..." # path to the rslearn dataset
@@ -284,7 +287,8 @@ data:
       # Override SplitConfig options for testing.
     predict_config:
       # Override SplitConfig options for prediction.
-    retries: 0 # number of retries for __getitem__ in case the dataset is stored on flaky remote storage
+    # Number of retries for __getitem__ when using flaky remote storage.
+    retries: 0
 ```
 
 The `DataInput` and `SplitConfig` configure classes defined in `rslearn.train.dataset`.
@@ -301,43 +305,47 @@ Here is an example for a simple single-task training setup that inputs one modal
 ```yaml
     inputs:
       # The top-level names "image" and "targets" can be arbitrary, but should
-      # correspond to what the model and/or task expects, or to other parts of the
-      # model configuration file.
+      # correspond to what the model and/or task expects, or to other parts of
+      # the model configuration file.
       image:
         # Either "raster" or "vector".
         data_type: "raster"
         # The layer names in the rslearn dataset that should be read from.
         layers: ["sentinel2"]
-        # The bands to read. These should correspond to band names in the dataset
-        # config.json for each of the layers above.
+        # The bands to read. These should correspond to band names in the
+        # dataset config.json for each of the layers above.
         bands: ["B04", "B03", "B02", "B05", "B06", "B07", "B08", "B11", "B12"]
         # Alternatively, omit `bands` and set
         # `use_all_bands_in_order_of_band_set_idx` to a band_set index to
-        # automatically use all bands from that band_set in dataset-config order.
+        # automatically use all bands from that band_set in dataset-config
+        # order.
         use_all_bands_in_order_of_band_set_idx: 0
-        # If true, examples not containing the layers needed to read this input are
-        # skipped. This should generally be left enabled (default).
+        # If true, examples not containing the layers needed to read this input
+        # are skipped. This should generally be left enabled (default).
         required: true
-        # Currently, this option should be enabled for all inputs that are not used as
-        # targets for training, including inputs to the model. Targets do not need
-        # passthrough since they will be processed by the Task object into label dicts.
+        # Currently, this option should be enabled for all inputs that are not
+        # used as targets for training, including inputs to the model. Targets
+        # do not need passthrough since they will be processed by the Task
+        # object into label dicts.
         passthrough: true
-        # Whether this is a target that should only be read during the train, validate,
-        # and test stages. If enabled, this input will be skipped for prediction, and
-        # windows not containing it will not be skipped (even if required is true).
+        # Whether this is a target that should only be read during the train,
+        # validate, and test stages. If enabled, this input will be skipped for
+        # prediction, and windows not containing it will not be skipped (even if
+        # required is true).
         is_target: false
         # For rasters, the data type that it should be cast to after reading.
         dtype: FLOAT32
-        # The default behavior is to load a random layer listed in the layers option.
-        # If load_all_layers is enabled, then rslearn will instead load all of the
-        # layers, and concatenate (for raster data) or merge (for vector data) the data
-        # across layers. Additionally, examples missing any one of those layers will be
-        # skipped, instead of only skipping examples missing all of those layers.
+        # The default behavior is to load a random layer listed in the layers
+        # option. If load_all_layers is enabled, then rslearn will instead load
+        # all of the layers, and concatenate (for raster data) or merge (for
+        # vector data) the data across layers. Additionally, examples missing
+        # any one of those layers will be skipped, instead of only skipping
+        # examples missing all of those layers.
         load_all_layers: false
-        # If enabled, any layer appearing in the layers option will be expanded to
-        # include all of its item groups.
-        # Note that, when this option is false, the elements of layers are treated as
-        # item groups, but when true, they are treated as overall layers.
+        # If enabled, any layer appearing in the layers option will be expanded
+        # to include all of its item groups. Note that, when this option is
+        # false, the elements of layers are treated as item groups, but when
+        # true, they are treated as overall layers.
         load_all_item_groups: false
       targets:
         data_type: "vector"
@@ -418,13 +426,14 @@ There are a few generic visualization options that are shared across most tasks.
     task:
       class_path: ...
       init_args:
-        # Which bands from the input image should be used to create an 8-bit PNG.
-        # Either one or three bands should be specified. The image is expected to be
-        # under the "image" key.
+        # Which bands from the input image should be used to create an 8-bit
+        # PNG. Either one or three bands should be specified. The image is
+        # expected to be under the "image" key.
         image_bands: [0, 1, 2]
-        # This defines an optional linear scaling from the raw image values to pixel
-        # values that should be saved. This is generally needed since usually the input
-        # image to the model will have been normalized already.
+        # This defines an optional linear scaling from the raw image values to
+        # pixel values that should be saved. This is generally needed since
+        # usually the input image to the model will have been normalized
+        # already.
         remap_values: [[0, 1], [0, 255]]
 ```
 
@@ -480,17 +489,17 @@ Here is an example of its usage.
       class_path: rslearn.train.tasks.multi_task.MultiTask
       init_args:
         tasks:
-          # The keys here are sub-task names, which must match those used for the
-          # task-specific decoders in the model architecture section.
+          # The keys here are sub-task names, which must match those used for
+          # the task-specific decoders in the model architecture section.
           regress:
             class_path: rslearn.train.tasks.per_pixel_regression.PerPixelRegressionTask
             init_args:
-              # Multiply the regression labels by 0.1 for the purpose of training the
-              # model.
+              # Multiply the regression labels by 0.1 for the purpose of
+              # training the model.
               scale_factor: 0.1
-              # Compute metric as the L1 (absolute error) between the predicted values
-              # and the labels. Note that while the loss operates over the scaled
-              # values, the metric operates over the unscaled values.
+              # Compute metric as the L1 (absolute error) between the predicted
+              # values and the labels. Note that while the loss operates over
+              # the scaled values, the metric operates over the unscaled values.
               # (metric_mode is deprecated; use metrics.)
               metrics: ["l1"]
           segment:
@@ -500,11 +509,12 @@ Here is an example of its usage.
               enable_miou_metric: true
         input_mapping:
           # This specifies a per-task remapping from the keys in inputs to keys
-          # expected by the task. Currently, all tasks expect the labels to be under
-          # the "targets" key. The tasks will process these into a form suitable for
-          # training.
+          # expected by the task. Currently, all tasks expect the labels to be
+          # under the "targets" key. The tasks will process these into a form
+          # suitable for training.
           regress:
-            # The key here must match the name of the input under the inputs section.
+            # The key here must match the name of the input under the inputs
+            # section.
             regress_input: "targets"
             segment_input: "targets"
 ```
@@ -539,42 +549,44 @@ Here is a summary of all of the options available in the SplitConfig.
       # Only use these window names.
       names: null
       # Only use windows that have matching key-value pairs in their options
-      # dictionary. This is often used to separate the windows used for training vs
-      # validation and testing, see the main README tutorial for an example of that.
-      # All the keys/values here must match.
+      # dictionary. This is often used to separate the windows used for training
+      # vs validation and testing, see the main README tutorial for an example
+      # of that. All the keys/values here must match.
       tags:
         split: default
-      # Limit to training on this many windows from the underlying dataset. This option
-      # is mainly used for low data regime experiments.
+      # Limit to training on this many windows from the underlying dataset. This
+      # option is mainly used for low data regime experiments.
       num_samples: null
       transforms:
         # List of transforms to apply on the initial input and target dicts.
         - class_path: rslearn.train.transforms.flip.Flip
-      # By default, each training epoch simply iterates over the windows in a random
-      # order. A different sampler can be used to implement things like weighted random
-      # sampling. Here is an example of that.
+      # By default, each training epoch simply iterates over the windows in a
+      # random order. A different sampler can be used to implement things like
+      # weighted random sampling. Here is an example of that.
       sampler:
         class_path: rslearn.train.dataset.WeightedRandomSamplerFactory
         init_args:
-          # The key in the window's options dict containing the per-window weights.
+          # The key in the window's options dict containing the per-window
+          # weights.
           option_key: weight
-          # The number of samples per epoch. This does not need to match the number of
-          # training windows, since the weighted sampling means we will not see each
-          # window on each epoch.
+          # The number of samples per epoch. This does not need to match the
+          # number of training windows, since the weighted sampling means we
+          # will not see each window on each epoch.
           num_samples: 1000
-      # By default (patch_size=null), data for the entire window bounds is read. This
-      # can be cropped using transforms, but if a random crop is desired, it is more
-      # efficient to crop it with this option, since this way the cropping will happen
-      # when reading GeoTIFFs. However, setting it here is less flexible, since it only
-      # supports random cropping.
-      patch_size: 128
-      # For validation, testing, and prediction, patch_size can be combined with
-      # load_all_crops to perform sliding window inference. For training, it should
-      # usually be left false so that each training epoch sees a different crop.
+      # By default (crop_size=null), data for the entire window bounds is read.
+      # This can be cropped using transforms, but if a random crop is desired,
+      # it is more efficient to crop it with this option, since this way the
+      # cropping will happen when reading GeoTIFFs. However, setting it here is
+      # less flexible, since it only supports random cropping.
+      crop_size: 128
+      # For validation, testing, and prediction, crop_size can be combined with
+      # load_all_crops to perform sliding window inference. For training, it
+      # should usually be left false so that each training epoch sees a
+      # different crop.
       load_all_crops: false
-      # This should typically be enabled for predict_config, so that windows without
-      # layers containing targets are skipped. For training, validation, and testing,
-      # targets are needed so it should be false.
+      # This should typically be enabled for predict_config, so that windows
+      # without layers containing targets are skipped. For training, validation,
+      # and testing, targets are needed so it should be false.
       skip_targets: false
       # Resume partial inference: if set, windows that already have this layer
       # completed will be skipped by default, so predict can resume without
@@ -607,8 +619,8 @@ model:
         encoder:
           - class_path: rslearn.models.olmoearth_pretrain.model.OlmoEarth
             init_args:
-              forward_kwargs:
-                patch_size: 4
+              model_id: OLMOEARTH_V1_BASE
+              patch_size: 4
         decoder:
           - class_path: rslearn.models.faster_rcnn.FasterRCNN
             init_args:
@@ -634,20 +646,23 @@ data:
       init_args:
         property_name: "category"
         classes: ["unknown", "class1", "class2"]
-    train_configs:
-      # Flip the images and boxes.
-      - class_path: rslearn.train.transforms.flip.Flip
-        # This must match the name of the input defined above.
-        image_selectors: ["sentinel2_l2a"]
-        # This tells Flip to also flip boxes in the target dict.
-        box_selectors: ["targets/"]
-      # Copy the sentinel2_l2a image to the "image" key since, while OlmoEarth model
-      # expects it under "sentinel2_l2a", Faster R-CNN and the task visualization will
-      # look for it under "image".
-      - class_path: rslearn.train.transforms.concatenate.Concatenate
-        selections:
-          sentinel2_l2a: []
-        output_selector: image
+    train_config:
+      transforms:
+        # Flip the images and boxes.
+        - class_path: rslearn.train.transforms.flip.Flip
+          init_args:
+            # This must match the name of the input defined above.
+            image_selectors: ["sentinel2_l2a"]
+            # This tells Flip to also flip boxes in the target dict.
+            box_selectors: ["targets/"]
+        # Copy the sentinel2_l2a image to the "image" key since, while OlmoEarth
+        # model expects it under "sentinel2_l2a", Faster R-CNN and the task
+        # visualization will look for it under "image".
+        - class_path: rslearn.train.transforms.concatenate.Concatenate
+          init_args:
+            selections:
+              sentinel2_l2a: []
+            output_selector: image
 ```
 
 The selectors in the transforms refer to keys under the input or target dicts. A
@@ -670,30 +685,30 @@ Common options are summarized below:
 
 ```yaml
 trainer:
-  # Train for up to this many epochs. It will train for this many epochs unless an
-  # early stopping callback is used.
+  # Train for up to this many epochs. It will train for this many epochs unless
+  # an early stopping callback is used.
   max_epochs: 100
-  # Lightning uses callbacks to perform various actions during training, like saving
-  # model checkpoints. rslearn also includes some custom checkpoints for things like
-  # writing predictions to the rslearn dataset during the prediction stage.
+  # Lightning uses callbacks to perform various actions during training, like
+  # saving model checkpoints. rslearn also includes some custom checkpoints for
+  # things like writing predictions to the rslearn dataset during the prediction
+  # stage.
   callbacks:
-    # We show some common callbacks here.
-    # The LearningRateMonitor will log the current learning rate. We configure it to
-    # log once per epoch.
+    # We show some common callbacks here. The LearningRateMonitor will log the
+    # current learning rate. We configure it to log once per epoch.
     - class_path: lightning.pytorch.callbacks.LearningRateMonitor
       init_args:
         logging_interval: "epoch"
-    # The RslearnWriter is responsible for saving predictions to the rslearn dataset.
-    # It is only active during the predict stage.
+    # The RslearnWriter is responsible for saving predictions to the rslearn
+    # dataset. It is only active during the predict stage.
     - class_path: rslearn.train.prediction_writer.RslearnWriter
       init_args:
         # This is the name of the layer in the rslearn dataset under which the
         # predictions should be saved. It must exist in the dataset config.
         output_layer: output
         # This defines how to access the output that should be saved from the
-        # dictionary returned by the model. When using SingleTaskModel, this option can
-        # generally be omitted. When using MultiTaskModel, this option should usually
-        # match with the sub-task name.
+        # dictionary returned by the model. When using SingleTaskModel, this
+        # option can generally be omitted. When using MultiTaskModel, this
+        # option should usually match with the sub-task name.
         selector: ["detect"]
 ```
 
@@ -720,9 +735,9 @@ This callback automatically determines its checkpoint directory from
 Common options are summarized below:
 
 ```yaml
-# The management directory. Setting this (default null) enables model management. We
-# recommend setting it to ${MANAGEMENT_DIR} so that it can easily be changed in
-# different environments.
+# The management directory. Setting this (default null) enables model
+# management. We recommend setting it to ${MANAGEMENT_DIR} so that it can easily
+# be changed in different environments.
 management_dir: ${MANAGEMENT_DIR}
 # The project name; corresponds to the W&B project or MLflow experiment.
 project_name: my_project
@@ -736,9 +751,9 @@ run_description: this is my first experiment
 # 'best' loads the best checkpoint.
 # 'auto' will use 'last' during fit and 'best' during val/test/predict.
 load_checkpoint_mode: auto
-# Whether to fail if the expected checkpoint based on load_checkpoint_mode does not exist (default 'auto').
-# 'yes' will fail while 'no' won't.
-# 'auto' will use 'no' during fit and 'yes' during val/test/predict.
+# Whether to fail if the expected checkpoint based on load_checkpoint_mode does
+# not exist (default 'auto'). 'yes' will fail while 'no' won't. 'auto' will use
+# 'no' during fit and 'yes' during val/test/predict.
 load_checkpoint_required: auto
 # Whether to use the configured experiment logger (default 'auto').
 # 'yes' will enable logging.
@@ -747,8 +762,9 @@ load_checkpoint_required: auto
 log_mode: auto
 trainer:
   callbacks:
-    # Saves last.ckpt every validation epoch and best.ckpt when the metric improves.
-    # dirpath is automatically set from management_dir/project_name/run_name.
+    # Saves last.ckpt every validation epoch and best.ckpt when the metric
+    # improves. dirpath is automatically set from
+    # management_dir/project_name/run_name.
     - class_path: rslearn.train.callbacks.checkpointing.ManagedBestLastCheckpoint
       init_args:
         monitor: val_loss
@@ -763,6 +779,8 @@ be changed to instantiate a custom class.
 For example, you could develop a new optimizer class:
 
 ```python
+from dataclasses import asdict, dataclass
+
 import lightning as L
 import torch.optim
 from rslearn.train.optimizer import OptimizerFactory
@@ -770,18 +788,18 @@ from torch.optim import Optimizer
 
 @dataclass
 class Adadelta(OptimizerFactory):
-    """Factory for Adadelta optimizer."""
+  """Factory for Adadelta optimizer."""
 
-    lr: float = 0.001
-    rho: float | None = None
-    eps: float | None = None
-    weight_decay: float | None = None
+  lr: float = 0.001
+  rho: float | None = None
+  eps: float | None = None
+  weight_decay: float | None = None
 
-    def build(self, lm: L.LightningModule) -> Optimizer:
-        """Build the Adadelta optimizer."""
-        params = [p for p in lm.parameters() if p.requires_grad]
-        kwargs = {k: v for k, v in asdict(self).items() if v is not None}
-        return torch.optim.Adadelta(params, **kwargs)
+  def build(self, lm: L.LightningModule) -> Optimizer:
+    """Build the Adadelta optimizer."""
+    params = [p for p in lm.parameters() if p.requires_grad]
+    kwargs = {k: v for k, v in asdict(self).items() if v is not None}
+    return torch.optim.Adadelta(params, **kwargs)
 
 ```
 

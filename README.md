@@ -19,7 +19,7 @@ If you are new to rslearn, we suggest starting here:
 
 1. First, read [CoreConcepts](docs/CoreConcepts.md), which summarizes key concepts in
    rslearn, including datasets, windows, layers, and data sources.
-2. Second, read [WorkflowOverview](docs/Usage.md), which provides an overview
+2. Second, read the [Usage overview](docs/Usage.md), which provides an overview
    of the typical workflow in rslearn, from defining windows to training models.
 3. Finally, walk through the [Quickstart](docs/examples/Quickstart.md), or find
    another example in [Examples.md](docs/Examples.md) that can most readily be adapted
