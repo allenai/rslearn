@@ -1,4 +1,6 @@
-Usage of rslearn typically follows this workflow:
+# Usage
+
+An rslearn workflow typically follows these steps:
 
 1. Specify the dataset configuration file.
 2. Create windows.
@@ -12,7 +14,7 @@ Usage of rslearn typically follows this workflow:
 Steps 1-3 are sufficient if you are using rslearn to obtain remote sensing data, but
 not to train remote sensing models.
 
-## Specify the Dataset Configuration File
+## Specify the Dataset Configuration
 
 The dataset configuration file specifies the raster and vector layers in the rslearn
 dataset. Each layer can be programmatically populated with data, or can specify a data
@@ -30,10 +32,10 @@ source from which the layer can be automatically populated.
 
 rslearn datasets consist of windows. Each window is a spatiotemporal box.
 
-- [DatasetAddWindows](./DatasetAddWindows.md) details how to create windows from the
-  command-line interface.
-- [ProgrammaticWindows](examples/ProgrammaticWindows.md) shows how to create windows
-  programmatically.
+- [Create Windows via CLI](DatasetAddWindows.md) covers bounding boxes, vector files,
+  projections, fixed-size windows, and grids.
+- [Create Windows Programmatically](CreateWindowsProgrammatically.md) covers custom
+  logic such as per-feature time ranges and train/validation metadata.
 
 ## Import from Data Sources
 
@@ -41,7 +43,7 @@ Once windows are created, data can be imported from configured data sources by r
 the prepare (match data source items to windows), ingest (download items), and
 materialize (re-project and crop items to align with windows) stages:
 
-```
+```bash
 rslearn dataset prepare --root /path/to/dataset
 rslearn dataset ingest --root /path/to/dataset
 rslearn dataset materialize --root /path/to/dataset
@@ -49,14 +51,16 @@ rslearn dataset materialize --root /path/to/dataset
 
 ## Add Additional Raster and Vector Data
 
-If you have vector annotations that you want to use as targets during training, or you
-already have your own remote sensing images, then you can add these to your rslearn
-dataset instead of importing it from a data source.
+If you already have imagery or annotations, add them through the `LocalFiles` data
+source or write data directly to windows:
 
-[ProgrammaticWindows](examples/ProgrammaticWindows.md) shows how to programmatically
-add additional raster and vector data to a dataset. Alternatively, if you have a
-local collection of GeoTIFF or GeoJSON files, you can use the
-[LocalFiles data source](./data_sources/local_files_LocalFiles.md) to import them.
+- [Add Raster Data](AddRasterData.md) shows how to import GeoTIFFs and how to convert
+  and write a task-ready label raster directly.
+- [Add Vector Data](AddVectorData.md) shows how to import GeoJSON/Shapefile data and
+  how to create windows and point labels from a CSV.
+
+The [Find Stadiums](examples/FindStadiums.md) tutorial demonstrates a related pattern:
+it starts with vector point labels and writes raster labels for `SegmentationTask`.
 
 ## Specify the Model Configuration File
 
@@ -76,5 +80,6 @@ targets, and training hyperparameters.
 ## Get Model Predictions
 
 Getting model predictions in a new region involves creating windows corresponding to
-that region, and running the `rslearn model predict` command. The examples in the
-[README](https://github.com/allenai/rslearn/blob/master/README.md) and [Examples](./Examples.md) show how to do that.
+that region, and running the `rslearn model predict` command. The
+[Quickstart](examples/Quickstart.md) and other [Examples](Examples.md) show complete
+prediction workflows.
