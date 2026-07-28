@@ -114,7 +114,8 @@ with rasterio.open("one_hot_labels.tif") as source:
   one_hot = source.read()
 
 # Convert the one-hot array into class IDs that are compatible with
-# SegmentationTask. We use 255 as a nodata value.
+# SegmentationTask. We use 255 as a nodata value. We skip pixels where none of
+# the per-class bands is non-zero.
 valid = np.any(one_hot != 0, axis=0)
 class_ids = np.argmax(one_hot, axis=0).astype(np.uint8)[None, :, :]
 class_ids[0, ~valid] = 255
@@ -167,6 +168,9 @@ data:
     task:
       class_path: rslearn.train.tasks.segmentation.SegmentationTask
       init_args:
+        # This should be set to the number of classes in one_hot_labels.tif.
+        # Here, we suppose there are four classes. In the label raster, these
+        # would be encoded as 0, 1, 2, and 3.
         num_classes: 4
         nodata_value: 255
 ```
