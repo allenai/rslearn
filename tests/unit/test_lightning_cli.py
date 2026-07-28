@@ -13,8 +13,8 @@ from rslearn.lightning_cli import (
 )
 
 
-def test_save_config_falls_back_to_default_root_dir(tmp_path: pathlib.Path) -> None:
-    """SaveConfigCallback works with remote MLflow loggers whose log_dir is None."""
+def test_save_config_uses_default_root_dir(tmp_path: pathlib.Path) -> None:
+    """Config is saved under project management rather than the logger directory."""
 
     class FakeParser:
         def save(
@@ -33,7 +33,7 @@ def test_save_config_falls_back_to_default_root_dir(tmp_path: pathlib.Path) -> N
         "Trainer",
         (),
         {
-            "log_dir": None,
+            "log_dir": str(tmp_path / "logger"),
             "default_root_dir": str(tmp_path),
             "is_global_zero": True,
             "strategy": FakeStrategy(),
@@ -48,7 +48,38 @@ def test_save_config_falls_back_to_default_root_dir(tmp_path: pathlib.Path) -> N
     callback.setup(trainer, pl_module=None, stage="fit")  # type: ignore[arg-type]
 
     assert (tmp_path / "config.yaml").read_text() == "config"
+    assert not (tmp_path / "logger" / "config.yaml").exists()
     assert callback.already_saved
+
+
+def test_save_config_supports_remote_default_root_dir() -> None:
+    """Config can be saved to a project management directory through fsspec."""
+
+    class FakeStrategy:
+        def broadcast(self, value: object) -> object:
+            return value
+
+    root_dir = "memory://rslearn-tests/project"
+    trainer = type(
+        "Trainer",
+        (),
+        {
+            "log_dir": ".",
+            "default_root_dir": root_dir,
+            "is_global_zero": True,
+            "strategy": FakeStrategy(),
+        },
+    )()
+    callback = RslearnSaveConfigCallback(
+        lightning_cli_module.LightningArgumentParser(),
+        config=lightning_cli_module.jsonargparse.Namespace(),
+        overwrite=True,
+    )
+
+    callback.setup(trainer, pl_module=None, stage="fit")  # type: ignore[arg-type]
+
+    fs = lightning_cli_module.fsspec.filesystem("memory")
+    assert fs.isfile("rslearn-tests/project/config.yaml")
 
 
 @pytest.mark.parametrize(

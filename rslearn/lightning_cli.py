@@ -35,7 +35,7 @@ logger = get_logger(__name__)
 
 
 class RslearnSaveConfigCallback(SaveConfigCallback):
-    """Save the CLI config even when the logger has no local log directory."""
+    """Save the CLI config in the trainer's default root directory."""
 
     save_to_log_dir: bool
 
@@ -45,13 +45,8 @@ class RslearnSaveConfigCallback(SaveConfigCallback):
         pl_module: LightningModule,
         stage: str,
     ) -> None:
-        """Fall back to ``default_root_dir`` when ``log_dir`` is unavailable."""
+        """Save to ``default_root_dir`` independently of the logger directory."""
         if self.already_saved or not self.save_to_log_dir:
-            super().setup(trainer, pl_module, stage)
-            return
-
-        log_dir = trainer.log_dir
-        if log_dir is not None:
             super().setup(trainer, pl_module, stage)
             return
 
