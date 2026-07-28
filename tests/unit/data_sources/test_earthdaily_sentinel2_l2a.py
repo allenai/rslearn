@@ -3,6 +3,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 import numpy as np
+import pystac
 import pytest
 import rasterio
 import shapely
@@ -20,6 +21,7 @@ def _make_item(
     *,
     name: str = "item1",
     product_id: str | None = None,
+    boa_offset_applied: bool | None = None,
     start_time: datetime = datetime(2024, 1, 1, tzinfo=UTC),
     end_time: datetime = datetime(2024, 1, 2, tzinfo=UTC),
 ) -> EarthDailyItem:
@@ -33,6 +35,7 @@ def _make_item(
         geometry=geom,
         asset_urls=asset_urls,
         product_id=product_id,
+        boa_offset_applied=boa_offset_applied,
     )
 
 
@@ -56,7 +59,8 @@ def test_read_raster_harmonizes_non_visual_band(
         dst.write(raw)
 
     item = _make_item(
-        {"B04": str(tif_path), "product_metadata": "https://example.com/meta.xml"}
+        {"B04": str(tif_path), "product_metadata": "https://example.com/meta.xml"},
+        boa_offset_applied=False,
     )
     ds = Sentinel2L2A(harmonize=True, assets=["B04"], cache_dir=None)
     monkeypatch.setattr(ds, "get_item_by_name", lambda _name: item)
@@ -81,6 +85,75 @@ def test_read_raster_harmonizes_non_visual_band(
     expected[(expected == 0) & (raw > 0)] = 1
     assert out.dtype == np.uint16
     np.testing.assert_array_equal(out, expected)
+
+
+def test_read_raster_skips_harmonization_when_offset_already_applied(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Earth Search COGs marked as corrected must not lose another 1000 DN."""
+    tif_path = tmp_path / "B04.tif"
+    raw = np.array([[[900, 1000], [1200, 2200]]], dtype=np.uint16)
+    with rasterio.open(
+        tif_path,
+        "w",
+        driver="GTiff",
+        width=2,
+        height=2,
+        count=1,
+        dtype=str(raw.dtype),
+        crs=CRS.from_epsg(3857),
+        transform=Affine(1, 0, 0, 0, -1, 0),
+    ) as dst:
+        dst.write(raw)
+
+    item = _make_item(
+        {"B04": str(tif_path), "product_metadata": "https://example.com/meta.xml"},
+        boa_offset_applied=True,
+    )
+    ds = Sentinel2L2A(harmonize=True, assets=["B04"], cache_dir=None)
+    monkeypatch.setattr(ds, "get_item_by_name", lambda _name: item)
+    monkeypatch.setattr(
+        ds,
+        "_get_product_xml",
+        lambda _item: (_ for _ in ()).throw(AssertionError("should not be called")),
+    )
+
+    out = ds.read_raster(
+        layer_name="layer",
+        item=item,
+        bands=["B04"],
+        projection=Projection(CRS.from_epsg(3857), 1, -1),
+        bounds=(0, 0, 2, 2),
+    ).get_chw_array()
+
+    np.testing.assert_array_equal(out, raw)
+
+
+@pytest.mark.parametrize("boa_offset_applied", [True, False])
+def test_stac_item_preserves_boa_offset_applied(boa_offset_applied: bool) -> None:
+    """Keep the Earth Search harmonization flag when converting STAC items."""
+    stac_item = pystac.Item(
+        id="S2A_TEST",
+        geometry=shapely.geometry.mapping(shapely.box(0, 0, 1, 1)),
+        bbox=[0, 0, 1, 1],
+        datetime=datetime(2024, 1, 1, tzinfo=UTC),
+        properties={"earthsearch:boa_offset_applied": boa_offset_applied},
+    )
+    stac_item.add_asset(
+        "B04",
+        pystac.Asset(
+            href="s3://source/B04.tif",
+            extra_fields={
+                "alternate": {"download": {"href": "https://example.com/B04.tif"}}
+            },
+        ),
+    )
+    ds = Sentinel2L2A(harmonize=True, assets=["B04"], cache_dir=None)
+
+    item = ds._stac_item_to_item(stac_item)
+
+    assert item.boa_offset_applied is boa_offset_applied
 
 
 def test_read_raster_does_not_harmonize_visual(

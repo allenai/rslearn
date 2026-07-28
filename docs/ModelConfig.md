@@ -720,9 +720,9 @@ If enabled, model management will:
    This is used by `ManagedBestLastCheckpoint` to resolve its checkpoint directory.
 2. If training is restarted, resume from the last checkpoint.
 3. During test/predict, automatically load the best checkpoint.
-4. Enable W&B logging and save the W&B run ID to the save project directory (so it can
-   be reused when resuming training).
-5. Save the model config with the W&B run.
+4. Enable W&B or MLflow logging and save the run ID to the project directory (so it
+   can be reused when resuming training).
+5. Save the model config with the experiment run.
 
 To save checkpoints, add a `ManagedBestLastCheckpoint` callback to `trainer.callbacks`.
 This callback automatically determines its checkpoint directory from
@@ -736,11 +736,11 @@ Common options are summarized below:
 # management. We recommend setting it to ${MANAGEMENT_DIR} so that it can easily
 # be changed in different environments.
 management_dir: ${MANAGEMENT_DIR}
-# The project name; corresponds to the W&B project.
+# The project name; corresponds to the W&B project or MLflow experiment.
 project_name: my_project
-# The run name (a name for this experiment); corresponds to the W&B run.
+# The run name (a name for this experiment).
 run_name: my_first_experiment
-# Optional description that will be added to the W&B run.
+# Optional description that will be added to the experiment run.
 run_description: this is my first experiment
 # Which checkpoint to load, if any (default 'auto').
 # 'none' never loads any checkpoint.
@@ -752,7 +752,7 @@ load_checkpoint_mode: auto
 # not exist (default 'auto'). 'yes' will fail while 'no' won't. 'auto' will use
 # 'no' during fit and 'yes' during val/test/predict.
 load_checkpoint_required: auto
-# Whether to log to W&B (default 'auto').
+# Whether to use the configured experiment logger (default 'auto').
 # 'yes' will enable logging.
 # 'no' will disable logging.
 # 'auto' will use 'yes' during fit and 'no' during val/test/predict.
