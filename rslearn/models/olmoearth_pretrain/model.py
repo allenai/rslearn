@@ -78,10 +78,12 @@ class OlmoEarth(FeatureExtractor):
         embedding_size: int | None = None,
         autocast_dtype: str | None = "bfloat16",
         token_pooling: bool = True,
+        use_register_bottleneck_output: bool = False,
         use_legacy_timestamps: bool = True,
         timestamp_error_tolerance: timedelta = timedelta(days=15),
         normalize: bool = False,
         normalize_std_multiplier: float | None = 2,
+        compile_model: bool = False,
     ):
         """Create a new OlmoEarth model.
 
@@ -108,6 +110,13 @@ class OlmoEarth(FeatureExtractor):
             token_pooling: whether or not to pool the tokens. If True, the output will be BxCxHxW. If False,
                 there will be an extra dimension, N, (BxCxHxWxN) representing the temporal and channel
                 dimensions.
+            use_register_bottleneck_output: return the model's spatial register
+                bottleneck latents instead of the encoder patch tokens. The model must
+                have a register bottleneck (e.g. "regbtl" checkpoints); its register
+                grid latents (register_dim channels, typically narrower than the
+                encoder width) are returned as a single BxCxHxW feature map. Note that
+                this is unrelated to the classic ViT register tokens
+                (num_register_tokens).
             use_legacy_timestamps: set timestamps to dummy values [1 January 2024, 1 February 2024, ...]
                 instead of the actual timestamps of the input. The option to do this is preserved
                 for backwards compatability with finetuned models which were trained against this
@@ -128,6 +137,10 @@ class OlmoEarth(FeatureExtractor):
                 the same order the rest of the model assumes for the input channels.
             normalize_std_multiplier: the std multiplier to use for normalization, passed
                 through to OlmoEarthNormalize. Only used when normalize=True.
+            compile_model: apply torch.compile to the selected sub-module via its
+                apply_compile method (e.g. the encoder's per-block compilation). Note
+                that each distinct input shape triggers a (one-time) recompilation, so
+                this is most useful for fixed-shape bulk inference.
         """
         if use_legacy_timestamps:
             warnings.warn(
@@ -185,7 +198,15 @@ class OlmoEarth(FeatureExtractor):
             else:
                 model = model[part]
         self.model = model
+        if compile_model:
+            if not hasattr(self.model, "apply_compile"):
+                raise ValueError(
+                    "compile_model=True requires the selected sub-module to provide "
+                    "an apply_compile method"
+                )
+            self.model.apply_compile()
         self.token_pooling = token_pooling
+        self.use_register_bottleneck_output = use_register_bottleneck_output
         self.use_legacy_timestamps = use_legacy_timestamps
         self.timestamp_error_tolerance = timestamp_error_tolerance
 
@@ -732,16 +753,32 @@ class OlmoEarth(FeatureExtractor):
 
         with torch_context:
             # Currently we assume the provided model always returns a TokensAndMasks object.
-            tokens_and_masks = self.model(
+            model_output = self.model(
                 sample,
                 fast_pass=not missing_tokens,
                 patch_size=self.patch_size,
                 **self.forward_kwargs,
-            )["tokens_and_masks"]
+            )
+            tokens_and_masks = model_output["tokens_and_masks"]
 
         context.context_dict[TOKENS_IN_BATCH_KEY] = self.compute_tokens_in_batch(
             tokens_and_masks, present_modalities
         )
+
+        if self.use_register_bottleneck_output:
+            # Return the spatial register bottleneck latents instead of the encoder
+            # patch tokens. The registers form an (n_h, n_w) grid; in dynamic-grid
+            # mode this matches the patch grid, and register_grid is set on the
+            # bottleneck during the forward pass.
+            if "registers" not in model_output:
+                raise ValueError(
+                    "use_register_bottleneck_output=True but the model output has no "
+                    "'registers' key; the loaded model must have a register bottleneck"
+                )
+            registers = model_output["registers"]  # [B, n_h*n_w, D]
+            n_h, n_w = self.model.register_bottleneck.register_grid
+            features = rearrange(registers, "b (h w) d -> b d h w", h=n_h, w=n_w)
+            return FeatureMaps([features])
 
         # Apply temporal/modality pooling so we just have one feature per patch.
         features = []

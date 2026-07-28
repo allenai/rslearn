@@ -2,6 +2,7 @@
 
 from datetime import datetime, timedelta
 
+import pytest
 import torch
 from olmoearth_pretrain_minimal.olmoearth_pretrain_v1.nn.flexi_vit import TokensAndMasks
 from olmoearth_pretrain_minimal.olmoearth_pretrain_v1.utils.datatypes import MaskValue
@@ -64,6 +65,57 @@ def test_forward() -> None:
 
     # Backbone channels should match patch size and depth.
     assert model.get_backbone_channels() == [(4, 128)]
+
+
+def test_compile_model() -> None:
+    """Test that compile_model=True compiles the encoder and forward still works."""
+    model = OlmoEarth(
+        checkpoint_path="tests/unit/models/olmoearth_pretrain/",
+        # With random initialization we only need config.json, not the weights.
+        random_initialization=True,
+        patch_size=4,
+        embedding_size=128,
+        compile_model=True,
+    )
+
+    T = 2
+    H = 4
+    W = 4
+    inputs = [
+        {
+            # 12 channels per timestep.
+            "sentinel2_l2a": RasterImage(
+                image=torch.zeros(
+                    (12, T, H, W), dtype=torch.float32, device=torch.device("cpu")
+                ),
+                timestamps=[
+                    (datetime(2025, x, 1), datetime(2025, x, 1))
+                    for x in range(1, T + 1)
+                ],
+            )
+        }
+    ]
+    feature_map = model(
+        ModelContext(inputs=inputs, metadatas=[_make_metadata((0, 0, H, W))])
+    )
+
+    assert len(feature_map.feature_maps) == 1
+    features = feature_map.feature_maps[0]
+    assert features.shape == (1, 128, 1, 1)
+
+
+def test_compile_model_requires_apply_compile() -> None:
+    """compile_model=True should raise if the selected sub-module lacks apply_compile."""
+    with pytest.raises(ValueError, match="apply_compile"):
+        OlmoEarth(
+            checkpoint_path="tests/unit/models/olmoearth_pretrain/",
+            random_initialization=True,
+            patch_size=4,
+            embedding_size=128,
+            # The blocks ModuleList has no apply_compile method.
+            selector=["encoder", "blocks"],
+            compile_model=True,
+        )
 
 
 def test_forward_no_pooling() -> None:
