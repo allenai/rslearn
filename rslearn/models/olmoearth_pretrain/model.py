@@ -8,6 +8,7 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta
 from typing import Any
 
+import shapely
 import torch
 from einops import rearrange
 from olmoearth_pretrain_minimal import ModelID, load_model_from_id, load_model_from_path
@@ -25,10 +26,12 @@ from olmoearth_pretrain_minimal.olmoearth_pretrain_v1.utils.datatypes import (
 )
 from upath import UPath
 
+from rslearn.const import WGS84_PROJECTION
 from rslearn.log_utils import get_logger
 from rslearn.models.component import FeatureExtractor, FeatureMaps, TokenFeatureMaps
 from rslearn.models.olmoearth_pretrain.norm import OlmoEarthNormalize
-from rslearn.train.model_context import ModelContext, RasterImage
+from rslearn.train.model_context import ModelContext, RasterImage, SampleMetadata
+from rslearn.utils.geometry import STGeometry
 
 logger = get_logger(__name__)
 
@@ -82,6 +85,7 @@ class OlmoEarth(FeatureExtractor):
         timestamp_error_tolerance: timedelta = timedelta(days=15),
         normalize: bool = False,
         normalize_std_multiplier: float | None = 2,
+        use_latlon: bool = False,
     ):
         """Create a new OlmoEarth model.
 
@@ -128,6 +132,10 @@ class OlmoEarth(FeatureExtractor):
                 the same order the rest of the model assumes for the input channels.
             normalize_std_multiplier: the std multiplier to use for normalization, passed
                 through to OlmoEarthNormalize. Only used when normalize=True.
+            use_latlon: whether to compute each sample's crop-center lat/lon from its
+                metadata + CRS and pass it to the encoder for geographic encoding.
+                Requires the pretrained model to have been trained with a lat/lon
+                encoding.
         """
         if use_legacy_timestamps:
             warnings.warn(
@@ -213,6 +221,8 @@ class OlmoEarth(FeatureExtractor):
                 skip_missing=True,
             )
 
+        self.use_latlon = use_latlon
+
     def _patch_legacy_encoder_config(self, config_dict: dict) -> dict:
         """Patch checkpoint config dicts that predate use_linear_patch_embed.
 
@@ -225,6 +235,35 @@ class OlmoEarth(FeatureExtractor):
             config_dict = copy.deepcopy(config_dict)
             config_dict["model"]["encoder_config"]["use_linear_patch_embed"] = False
         return config_dict
+
+    @staticmethod
+    def _compute_latlon_from_metadata(
+        metadatas: list[SampleMetadata], device: torch.device
+    ) -> torch.Tensor:
+        """Compute lat/lon center coordinates from sample metadata.
+
+        Converts each sample's crop center from its native CRS to WGS84
+        (EPSG:4326) to produce geographic coordinates for the lat/lon encoding.
+
+        Args:
+            metadatas: list of SampleMetadata, one per sample in the batch.
+            device: torch device to place the output tensor on.
+
+        Returns:
+            Tensor of shape (B, 2) with (latitude, longitude) in degrees.
+        """
+        latlons = []
+        for meta in metadatas:
+            col_start, row_start, col_end, row_end = meta.crop_bounds
+            cx = (col_start + col_end) / 2.0
+            cy = (row_start + row_end) / 2.0
+            # crop_bounds are pixel coordinates in the window's projection; STGeometry
+            # carries the projection's resolution so to_projection handles the
+            # pixel -> CRS -> WGS84 conversion.
+            geom = STGeometry(meta.projection, shapely.Point(cx, cy), None)
+            wgs84_geom = geom.to_projection(WGS84_PROJECTION)
+            latlons.append([wgs84_geom.shp.y, wgs84_geom.shp.x])
+        return torch.tensor(latlons, dtype=torch.float32, device=device)
 
     def _load_model_from_checkpoint(
         self, checkpoint_upath: UPath, random_initialization: bool
@@ -712,6 +751,10 @@ class OlmoEarth(FeatureExtractor):
             )
         else:
             sample, present_modalities, device = self._prepare_modality_inputs(context)
+
+        if self.use_latlon:
+            latlon = self._compute_latlon_from_metadata(context.metadatas, device)
+            sample = sample._replace(latlon=latlon)
 
         # Decide context based on self.autocast_dtype.
         if self.autocast_dtype is None:
