@@ -96,6 +96,12 @@ These data sources are still experimental and may have incomplete functionality.
 | [chelsa.CHELSADaily](data_sources/chelsa_CHELSADaily.md) | CHELSA daily global climate rasters |
 | [earthdatahub.ERA5LandDailyUTCv1](data_sources/earthdatahub_ERA5LandDailyUTCv1.md) | ERA5-Land daily UTC from EarthDataHub |
 
+#### Land Surface Temperature / Thermal
+
+| Data Source | Description |
+|---|---|
+| [nasa_ecostress.EcostressLSTE](data_sources/nasa_ecostress_EcostressLSTE.md) | NASA ECOSTRESS tiled L2 LST&E (ECO_L2T_LSTE, 70m), from LP DAAC |
+
 #### Land Cover / Crop
 
 | Data Source | Description |
