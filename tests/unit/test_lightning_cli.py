@@ -6,58 +6,80 @@ from typing import Any
 import pytest
 
 import rslearn.lightning_cli as lightning_cli_module
-from rslearn.lightning_cli import MLFLOW_ID_FNAME, SaveMLflowRunIdCallback
-
-
-@pytest.mark.parametrize(
-    ("class_path", "tracking_uri", "expected"),
-    [
-        ("lightning.pytorch.loggers.MLFlowLogger", "https://mlflow.test", True),
-        ("lightning.pytorch.loggers.MLFlowLogger", "file:./mlruns", False),
-        ("lightning.pytorch.loggers.WandbLogger", "https://mlflow.test", False),
-    ],
+from rslearn.lightning_cli import (
+    MLFLOW_ID_FNAME,
+    RslearnSaveConfigCallback,
+    SaveMLflowRunIdCallback,
 )
-def test_detect_mlflow_logger_without_local_save_dir(
-    class_path: str,
-    tracking_uri: str,
-    expected: bool,
-) -> None:
-    """Only remote MLflow loggers lack the directory SaveConfigCallback needs."""
-    logger_config = lightning_cli_module.jsonargparse.Namespace(
-        class_path=class_path,
-        init_args=lightning_cli_module.jsonargparse.Namespace(
-            tracking_uri=tracking_uri
-        ),
+
+
+def test_save_config_uses_default_root_dir(tmp_path: pathlib.Path) -> None:
+    """Config is saved under project management rather than the logger directory."""
+
+    class FakeParser:
+        def save(
+            self,
+            config: object,
+            path: str,
+            **kwargs: object,
+        ) -> None:
+            pathlib.Path(path).write_text("config")
+
+    class FakeStrategy:
+        def broadcast(self, value: object) -> object:
+            return value
+
+    trainer = type(
+        "Trainer",
+        (),
+        {
+            "log_dir": str(tmp_path / "logger"),
+            "default_root_dir": str(tmp_path),
+            "is_global_zero": True,
+            "strategy": FakeStrategy(),
+        },
+    )()
+    callback = RslearnSaveConfigCallback(
+        FakeParser(),  # type: ignore[arg-type]
+        config={},
+        overwrite=True,
     )
 
-    assert (
-        lightning_cli_module._mlflow_logger_has_no_local_save_dir(logger_config)
-        is expected
+    callback.setup(trainer, pl_module=None, stage="fit")  # type: ignore[arg-type]
+
+    assert (tmp_path / "config.yaml").read_text() == "config"
+    assert not (tmp_path / "logger" / "config.yaml").exists()
+    assert callback.already_saved
+
+
+def test_save_config_supports_remote_default_root_dir() -> None:
+    """Config can be saved to a project management directory through fsspec."""
+
+    class FakeStrategy:
+        def broadcast(self, value: object) -> object:
+            return value
+
+    root_dir = "memory://rslearn-tests/project"
+    trainer = type(
+        "Trainer",
+        (),
+        {
+            "log_dir": ".",
+            "default_root_dir": root_dir,
+            "is_global_zero": True,
+            "strategy": FakeStrategy(),
+        },
+    )()
+    callback = RslearnSaveConfigCallback(
+        lightning_cli_module.LightningArgumentParser(),
+        config=lightning_cli_module.jsonargparse.Namespace(),
+        overwrite=True,
     )
 
+    callback.setup(trainer, pl_module=None, stage="fit")  # type: ignore[arg-type]
 
-def test_remote_mlflow_disables_default_config_callback() -> None:
-    """Avoid SaveConfigCallback's assertion when MLflow has no local save directory."""
-    cli = object.__new__(lightning_cli_module.RslearnLightningCLI)
-    cli.save_config_callback = object()  # type: ignore[assignment]
-    cli.config = lightning_cli_module.jsonargparse.Namespace(
-        subcommand="fit",
-        fit=lightning_cli_module.jsonargparse.Namespace(
-            management_dir=None,
-            trainer=lightning_cli_module.jsonargparse.Namespace(
-                logger=lightning_cli_module.jsonargparse.Namespace(
-                    class_path="lightning.pytorch.loggers.MLFlowLogger",
-                    init_args=lightning_cli_module.jsonargparse.Namespace(
-                        tracking_uri="https://mlflow.test"
-                    ),
-                )
-            ),
-        ),
-    )
-
-    cli.before_instantiate_classes()
-
-    assert cli.save_config_callback is None
+    fs = lightning_cli_module.fsspec.filesystem("memory")
+    assert fs.isfile("rslearn-tests/project/config.yaml")
 
 
 @pytest.mark.parametrize(

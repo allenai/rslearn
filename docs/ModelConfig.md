@@ -719,13 +719,27 @@ it, when running `model test` and `model predict`, the checkpoint needs to be
 explicitly specified using `--ckpt_path`.
 
 If enabled, model management will:
+
 1. Set `trainer.default_root_dir` to `{management_dir}/{project_name}/{run_name}/`.
    This is used by `ManagedBestLastCheckpoint` to resolve its checkpoint directory.
 2. If training is restarted, resume from the last checkpoint.
 3. During test/predict, automatically load the best checkpoint.
 4. Enable W&B or MLflow logging and save the run ID to the project directory (so it
    can be reused when resuming training).
-5. Save the model config with the experiment run.
+5. Save `config.yaml` to the project directory and record the model config with the
+   experiment run.
+
+W&B is the default experiment logger. When Lightning's `MLFlowLogger` is configured,
+model management fills in the MLflow experiment and run names and reconnects to the
+saved run when training resumes. `MLFLOW_TRACKING_URI` selects the MLflow tracking
+server; it does not control where rslearn stores its managed config and checkpoints.
+
+The resolved config is written under `trainer.default_root_dir` independently of the
+logger's `save_dir`. Consequently, W&B and MLflow use the same project directory
+layout, including when `management_dir` is an fsspec-compatible URI. For example,
+`memory://rslearn-runs` can be used for ephemeral tests. Cloud URLs require the
+corresponding fsspec backend. When experiment logging is enabled, the config is also
+recorded in W&B or uploaded to MLflow as `config.json`.
 
 To save checkpoints, add a `ManagedBestLastCheckpoint` callback to `trainer.callbacks`.
 This callback automatically determines its checkpoint directory from
@@ -735,9 +749,9 @@ This callback automatically determines its checkpoint directory from
 Common options are summarized below:
 
 ```yaml
-# The management directory. Setting this (default null) enables model
-# management. We recommend setting it to ${MANAGEMENT_DIR} so that it can easily
-# be changed in different environments.
+# The local path or fsspec-compatible management directory. Setting this
+# (default null) enables model management. We recommend setting it to
+# ${MANAGEMENT_DIR} so that it can easily be changed in different environments.
 management_dir: ${MANAGEMENT_DIR}
 # The project name; corresponds to the W&B project or MLflow experiment.
 project_name: my_project
