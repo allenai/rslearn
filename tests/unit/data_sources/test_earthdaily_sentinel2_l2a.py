@@ -12,6 +12,8 @@ from rasterio.transform import Affine
 
 pytest.importorskip("earthdaily")
 
+from rslearn.config import QueryConfig, SpaceMode
+from rslearn.const import WGS84_PROJECTION
 from rslearn.data_sources.earthdaily import EarthDailyItem, Sentinel2L2A
 from rslearn.utils.geometry import Projection, STGeometry
 
@@ -154,6 +156,121 @@ def test_stac_item_preserves_boa_offset_applied(boa_offset_applied: bool) -> Non
     item = ds._stac_item_to_item(stac_item)
 
     assert item.boa_offset_applied is boa_offset_applied
+
+
+@pytest.mark.parametrize(
+    ("common_name", "canonical_name"),
+    [
+        ("blue", "B02"),
+        ("nir", "B08"),
+        ("scl", "SCL"),
+    ],
+)
+def test_stac_item_normalizes_common_name_asset_keys(
+    common_name: str, canonical_name: str
+) -> None:
+    stac_item = pystac.Item(
+        id="S2A_TEST",
+        geometry=shapely.geometry.mapping(shapely.box(0, 0, 1, 1)),
+        bbox=[0, 0, 1, 1],
+        datetime=datetime(2024, 1, 1, tzinfo=UTC),
+        properties={},
+    )
+    stac_item.add_asset(
+        common_name,
+        pystac.Asset(
+            href=f"s3://source/{common_name}.tif",
+            extra_fields={
+                "alternate": {
+                    "download": {"href": f"https://example.com/{common_name}.tif"}
+                }
+            },
+        ),
+    )
+    ds = Sentinel2L2A(assets=[canonical_name], cache_dir=None)
+
+    item = ds._stac_item_to_item(stac_item)
+
+    assert item.asset_urls == {canonical_name: f"https://example.com/{common_name}.tif"}
+
+
+def test_stac_item_prefers_canonical_asset_key_over_common_name() -> None:
+    stac_item = pystac.Item(
+        id="S2A_TEST",
+        geometry=shapely.geometry.mapping(shapely.box(0, 0, 1, 1)),
+        bbox=[0, 0, 1, 1],
+        datetime=datetime(2024, 1, 1, tzinfo=UTC),
+        properties={},
+    )
+    for asset_key in ("B02", "blue"):
+        stac_item.add_asset(
+            asset_key,
+            pystac.Asset(
+                href=f"s3://source/{asset_key}.tif",
+                extra_fields={
+                    "alternate": {
+                        "download": {"href": f"https://example.com/{asset_key}.tif"}
+                    }
+                },
+            ),
+        )
+    ds = Sentinel2L2A(assets=["B02"], cache_dir=None)
+
+    item = ds._stac_item_to_item(stac_item)
+
+    assert item.asset_urls == {"B02": "https://example.com/B02.tif"}
+
+
+def test_get_items_keeps_items_with_common_name_asset_keys(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    stac_item = pystac.Item(
+        id="S2A_TEST",
+        geometry=shapely.geometry.mapping(shapely.box(0, 0, 1, 1)),
+        bbox=[0, 0, 1, 1],
+        datetime=datetime(2024, 1, 1, tzinfo=UTC),
+        properties={},
+    )
+    for asset_key in ("blue", "nir", "scl"):
+        stac_item.add_asset(
+            asset_key,
+            pystac.Asset(
+                href=f"s3://source/{asset_key}.tif",
+                extra_fields={
+                    "alternate": {
+                        "download": {"href": f"https://example.com/{asset_key}.tif"}
+                    }
+                },
+            ),
+        )
+
+    class SearchResult:
+        def item_collection(self) -> list[pystac.Item]:
+            return [stac_item]
+
+    class Client:
+        def search(self, **kwargs: object) -> SearchResult:
+            return SearchResult()
+
+    ds = Sentinel2L2A(assets=["B02", "B08", "SCL"], cache_dir=None)
+    monkeypatch.setattr(ds, "_load_client", lambda: (None, Client(), None))
+    monkeypatch.setattr(
+        ds, "get_item_by_name", lambda _name: ds._stac_item_to_item(stac_item)
+    )
+    geometry = STGeometry(
+        WGS84_PROJECTION,
+        shapely.box(0.25, 0.25, 0.75, 0.75),
+        (datetime(2023, 12, 31, tzinfo=UTC), datetime(2024, 1, 2, tzinfo=UTC)),
+    )
+
+    groups = ds.get_items([geometry], QueryConfig(space_mode=SpaceMode.INTERSECTS))[0]
+
+    assert len(groups) == 1
+    assert groups[0].items[0].asset_urls == {
+        "B02": "https://example.com/blue.tif",
+        "B08": "https://example.com/nir.tif",
+        "SCL": "https://example.com/scl.tif",
+    }
 
 
 def test_read_raster_does_not_harmonize_visual(
