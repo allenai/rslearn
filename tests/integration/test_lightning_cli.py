@@ -3,6 +3,7 @@
 import json
 import pathlib
 
+import jsonargparse
 import lightning.pytorch as L
 import numpy as np
 import pytest
@@ -16,7 +17,7 @@ from rslearn.dataset import Dataset, Window
 from rslearn.dataset.window_data_storage.per_item_group import (
     PerItemGroupStorageFactory,
 )
-from rslearn.lightning_cli import RslearnLightningCLI
+from rslearn.lightning_cli import MLFLOW_ID_FNAME, RslearnLightningCLI
 from rslearn.train.data_module import RslearnDataModule
 from rslearn.train.lightning_module import RslearnLightningModule
 from rslearn.utils.feature import Feature
@@ -207,6 +208,48 @@ def _run_cli_fit(
         save_config_kwargs={"overwrite": True},
         parser_class=RslearnArgumentParser,
     )
+
+
+def test_mlflow_project_management_configuration(tmp_path: pathlib.Path) -> None:
+    """Project management configures and resumes an explicitly selected MLflow run."""
+    management_dir = tmp_path / "management"
+    project_dir = management_dir / "test_project" / "test_run"
+    project_dir.mkdir(parents=True)
+    (project_dir / "last.ckpt").touch()
+    (project_dir / MLFLOW_ID_FNAME).write_text("mlflow-run-id")
+
+    trainer = jsonargparse.Namespace(
+        logger=jsonargparse.Namespace(
+            class_path="lightning.pytorch.loggers.MLFlowLogger",
+            init_args=jsonargparse.Namespace(tags={"team": "earth"}),
+        ),
+        callbacks=[],
+    )
+    fit_config = jsonargparse.Namespace(
+        project_name="test_project",
+        run_name="test_run",
+        run_description="a test run",
+        log_mode="yes",
+        load_checkpoint_mode="last",
+        load_checkpoint_required="yes",
+        trainer=trainer,
+    )
+    cli = object.__new__(RslearnLightningCLI)
+    cli.config = jsonargparse.Namespace(subcommand="fit", fit=fit_config)
+
+    cli.enable_project_management(str(management_dir))
+
+    assert trainer.default_root_dir == str(project_dir)
+    assert trainer.enable_checkpointing is False
+    assert trainer.logger.init_args.experiment_name == "test_project"
+    assert trainer.logger.init_args.run_name == "test_run"
+    assert trainer.logger.init_args.run_id == "mlflow-run-id"
+    assert trainer.logger.init_args.tags == {
+        "team": "earth",
+        "mlflow.note.content": "a test run",
+    }
+    assert trainer.callbacks[0].class_path == "SaveMLflowRunIdCallback"
+    assert fit_config.ckpt_path == str(project_dir / "last.ckpt")
 
 
 def test_save_last_every_epoch_and_best_when_metric_improves(

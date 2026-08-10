@@ -35,7 +35,6 @@ is a suitable dataset configuration file:
       "data_source": {
         "class_path": "rslearn.data_sources.planetary_computer.Sentinel2",
         "init_args": {
-          "cache_dir": "cache/planetary_computer",
           "harmonize": true,
           "sort_by": "eo:cloud_cover"
         },
@@ -56,9 +55,6 @@ is a suitable dataset configuration file:
       }],
       "data_source": {
         "class_path": "rslearn.data_sources.planetary_computer.Naip",
-        "init_args": {
-          "cache_dir": "cache/planetary_computer"
-        },
         "ingest": false
       },
       "type": "raster"
@@ -96,30 +92,30 @@ from rslearn.utils.geometry import PixelBounds, Projection, STGeometry
 from rslearn.utils.get_utm_ups_crs import get_utm_ups_projection
 
 lon_lats = [
-    (-122.32, 47.62), # Seattle
-    (-106.29, 32.80), # White Sands National Park
-    (-102.851, 30.072), # Amtrak route between Alpine and Sanderson
-    (-122.233, 47.588), # Mercer Island Link station, to open in 2026
-    (-119.334, 35.665), # Poso Creek Viaduct project for California HSR (viaduct completed in 2020)
-    (-96.828, 32.959), # DART Addison Station, opened in October 2025
-    (-71.256, 42.471), # Minuteman Bikeway
+  (-122.32, 47.62), # Seattle
+  (-106.29, 32.80), # White Sands National Park
+  (-102.851, 30.072), # Amtrak route between Alpine and Sanderson
+  (-122.233, 47.588), # Mercer Island Link station, to open in 2026
+  (-119.334, 35.665), # Poso Creek Viaduct project for California HSR (viaduct completed in 2020)
+  (-96.828, 32.959), # DART Addison Station, opened in October 2025
+  (-71.256, 42.471), # Minuteman Bikeway
 ]
 
 def get_utm_proj_and_bounds(lon: float, lat: float) -> tuple[Projection, PixelBounds]:
-    # Convert the lon, lat to a UTM projection and bounds.
-    # First create an STGeometry corresponding to the point.
-    src_geom = STGeometry(WGS84_PROJECTION, shapely.Point(lon, lat), None)
-    # Get appropriate UTM projection (60 cm/pixel), and transform it.
-    utm_proj = get_utm_ups_projection(lon, lat, 0.6, -0.6)
-    dst_geom = src_geom.to_projection(utm_proj)
-    # Get a 1024x1024 image centered at the point.
-    bounds = (
-        int(dst_geom.shp.x) - 512,
-        int(dst_geom.shp.y) - 512,
-        int(dst_geom.shp.x) + 512,
-        int(dst_geom.shp.y) + 512,
-    )
-    return utm_proj, bounds
+  # Convert the lon, lat to a UTM projection and bounds.
+  # First create an STGeometry corresponding to the point.
+  src_geom = STGeometry(WGS84_PROJECTION, shapely.Point(lon, lat), None)
+  # Get appropriate UTM projection (60 cm/pixel), and transform it.
+  utm_proj = get_utm_ups_projection(lon, lat, 0.6, -0.6)
+  dst_geom = src_geom.to_projection(utm_proj)
+  # Get a 1024x1024 image centered at the point.
+  bounds = (
+    int(dst_geom.shp.x) - 512,
+    int(dst_geom.shp.y) - 512,
+    int(dst_geom.shp.x) + 512,
+    int(dst_geom.shp.y) + 512,
+  )
+  return utm_proj, bounds
 
 proj_bounds = [get_utm_proj_and_bounds(lon, lat) for lon, lat in lon_lats]
 ```
@@ -136,18 +132,18 @@ from rslearn.config.dataset import QueryConfig, SpaceMode
 data_source = Naip()
 timestamps = []
 for proj, bounds in proj_bounds:
-    # We query the data source using a large time range to see all the available
-    # images.
-    geom = STGeometry(
-        proj,
-        shapely.box(*bounds),
-        (datetime(2016, 1, 1, tzinfo=UTC), datetime(2025, 1, 1, tzinfo=UTC)),
-    )
-    items = data_source.get_items([geom], QueryConfig(space_mode=SpaceMode.INTERSECTS, max_matches=8))[0]
-    # Then get the timestamp of the latest NAIP image.
-    flat_items = [item for item_group in items for item in item_group]
-    flat_items.sort(key=lambda item: item.geometry.time_range[0])
-    timestamps.append(flat_items[-1].geometry.time_range[0])
+  # We query the data source using a large time range to see all the available
+  # images.
+  geom = STGeometry(
+    proj,
+    shapely.box(*bounds),
+    (datetime(2016, 1, 1, tzinfo=UTC), datetime(2025, 1, 1, tzinfo=UTC)),
+  )
+  item_groups = data_source.get_items([geom], QueryConfig(space_mode=SpaceMode.INTERSECTS, max_matches=8))[0]
+  # Then get the timestamp of the latest NAIP image.
+  flat_items = [item for item_group in item_groups for item in item_group.items]
+  flat_items.sort(key=lambda item: item.geometry.time_range[0])
+  timestamps.append(flat_items[-1].geometry.time_range[0])
 ```
 
 Finally, we can create the rslearn windows:
@@ -155,30 +151,29 @@ Finally, we can create the rslearn windows:
 ```python
 from datetime import timedelta
 
-from rslearn.dataset import Window
+from rslearn.dataset import Dataset, Window
 from upath import UPath
 
 # Replace with your dataset path.
-ds_path = UPath("./dataset")
+dataset = Dataset(UPath("./dataset"))
 
 for (lon, lat), (proj, bounds), ts in zip(lon_lats, proj_bounds, timestamps):
-    # Create the window.
-    window_group = "default"
-    window_name = f"window_{lon}_{lat}"
-    window = Window(
-        path=Window.get_window_root(ds_path, window_group, window_name),
-        group=window_group,
-        name=window_name,
-        projection=proj,
-        bounds=bounds,
-        # We create a four-month time range centered at the timestamp of the NAIP image
-        # so that we should be able to get enough Sentinel-2 scenes.
-        time_range=(
-            ts - timedelta(days=60),
-            ts + timedelta(days=60),
-        ),
-    )
-    window.save()
+  # Create the window.
+  window = Window(
+    storage=dataset.storage,
+    group="default",
+    name=f"window_{lon}_{lat}",
+    projection=proj,
+    bounds=bounds,
+    # We create a four-month time range centered at the timestamp of the
+    # NAIP image so that we should be able to get enough Sentinel-2 scenes.
+    time_range=(
+      ts - timedelta(days=60),
+      ts + timedelta(days=60),
+    ),
+    data_factory=dataset.window_data_storage_factory,
+  )
+  window.save()
 ```
 
 ## Materialize Data

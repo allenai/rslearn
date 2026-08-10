@@ -20,52 +20,55 @@ The overall dataset configuration file looks like this:
 
       // Layer type is "raster" or "vector".
       "type": "raster",
-      // Optional layer alias. If set, it overrides the name of this layer in the tile
-      // store, which simply defaults to the layer name.
+      // Optional layer alias. If set, it overrides the name of this layer in
+      // the tile store, which simply defaults to the layer name.
       "alias": "optional alias",
 
-      // Raster layers options.
-      // The band sets specify the groups of bands that are present in this layer.
+      // Raster layers options. The band sets specify the groups of bands that
+      // are present in this layer.
       "band_sets": [...],
 
       // Vector layer options.
       // The vector format configures how features are stored (default GeoJSON).
       "vector_format": {...},
 
-      // Layers to be populated automatically from a data source specify additional
-      // configuration options.
-      // The data source section is optional. If it is not set, it means that this layer
-      // will be populated by the user, e.g. programmatically via the Python API.
+      // Layers to be populated automatically from a data source specify
+      // additional configuration options. The data source section is optional.
+      // If it is not set, it means that this layer will be populated by the
+      // user, e.g. programmatically via the Python API.
       "data_source": {
         // The class path of the data source.
         "class_path": "rslearn.data_sources.gcp_public_data.Sentinel2",
-        // Data sources may expose additional configuration options, passed via init_args.
-        // class_path and init_args are handled by jsonargparse to instantiate the data
-        // source class.
+        // Data sources may expose additional configuration options, passed via
+        // init_args. class_path and init_args are handled by jsonargparse to
+        // instantiate the data source class.
         "init_args": {
           // ...
         },
-        // The query configuration specifies how items should be matched to windows. It is
-        // optional, and the values below are defaults.,
+        // The query configuration specifies how items should be matched to
+        // windows. It is optional, and the values below are defaults.,
         "query_config": {
-          // The space mode must be "MOSAIC" (default), "CONTAINS", "INTERSECTS", or "SINGLE_COMPOSITE".
+          // The space mode must be "MOSAIC" (default), "CONTAINS",
+          // "INTERSECTS", or "SINGLE_COMPOSITE".
           "space_mode": "MOSAIC",
           // The max matches defaults to 1.
           "max_matches": 1,
-          // The min matches defaults to 0. If fewer item groups are found, the window is
-          // rejected for this layer and no item groups are returned.
+          // The min matches defaults to 0. If fewer item groups are found, the
+          // window is rejected for this layer and no item groups are returned.
           "min_matches": 0,
-          // For MOSAIC, the number of overlapping items wanted within each item group covering
-          // the window (default 1). Set higher for compositing.
+          // For MOSAIC, the number of overlapping items wanted within each item
+          // group covering the window (default 1). Set higher for compositing.
           "mosaic_compositing_overlaps": 1,
-          // By default, the space mode controls how multiple item groups are created in case
-          // max_matches > 1. If period_duration is set, the window time range is instead
-          // divided into periods of this duration, and the space mode is applied within each
-          // period to produce one item group per period.
+          // By default, the space mode controls how multiple item groups are
+          // created in case max_matches > 1. If period_duration is set, the
+          // window time range is instead divided into periods of this duration,
+          // and the space mode is applied within each period to produce one
+          // item group per period.
           "period_duration": null,
-          // When period_duration is set, whether to return item groups in reverse temporal
-          // order (most recent first). Should always be set to false when setting period_duration.
-          // The default is true for backwards compatibility (deprecated).
+          // When period_duration is set, whether to return item groups in
+          // reverse temporal order (most recent first). Should always be set to
+          // false when setting period_duration. The default is true for
+          // backwards compatibility (deprecated).
           "per_period_mosaic_reverse_time_order": false,
         },
         // The time offset is optional. It defaults to 0.
@@ -75,20 +78,22 @@ The overall dataset configuration file looks like this:
         // The ingest flag is optional, and defaults to true.
         "ingest": true
       },
-      // Re-sampling method to use during materialization. This only applies to raster
-      // layers with a data source. It is used when there is a difference in CRS or
-      // resolution between the item from the data source and the window's target.
-      // It is one of "nearest", "bilinear" (default), "cubic", "cubic_spline".
+      // Re-sampling method to use during materialization. This only applies to
+      // raster layers with a data source. It is used when there is a difference
+      // in CRS or resolution between the item from the data source and the
+      // window's target. It is one of "nearest", "bilinear" (default), "cubic",
+      // "cubic_spline".
       "resampling_method": "bilinear",
-      // The compositing method to use, to handle raster item groups with more than one item.
-      // It can be FIRST_VALID (default), MEAN, MEDIAN, SPATIAL_MOSAIC_TEMPORAL_STACK,
-      // TEMPORAL_MEAN, TEMPORAL_MAX, TEMPORAL_MIN, or a custom compositor config.
+      // The compositing method to use, to handle raster item groups with more
+      // than one item. It can be FIRST_VALID (default), MEAN, MEDIAN,
+      // SPATIAL_MOSAIC_TEMPORAL_STACK, TEMPORAL_MEAN, TEMPORAL_MAX,
+      // TEMPORAL_MIN, or a custom compositor config.
       "compositing_method": "FIRST_VALID"
     },
     // ... (additional layers)
   },
-  // The tile store config is optional; for most use cases, the default of using a
-  // file-based tile store with GeoTIFFs and GeoJSONs works well.
+  // The tile store config is optional; for most use cases, the default of using
+  // a file-based tile store with GeoTIFFs and GeoJSONs works well.
   "tile_store": {
     // Tile store config.
   },

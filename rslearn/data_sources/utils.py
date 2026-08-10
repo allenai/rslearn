@@ -336,16 +336,20 @@ def _filter_and_project_items(
         placeholder_datetime = datetime.now(UTC)
         if query_config.time_mode == TimeMode.BEFORE:
             items.sort(
-                key=lambda item: item.geometry.time_range[0]
-                if item.geometry.time_range
-                else placeholder_datetime,
+                key=lambda item: (
+                    item.geometry.time_range[0]
+                    if item.geometry.time_range
+                    else placeholder_datetime
+                ),
                 reverse=True,
             )
         elif query_config.time_mode == TimeMode.AFTER:
             items.sort(
-                key=lambda item: item.geometry.time_range[0]
-                if item.geometry.time_range
-                else placeholder_datetime,
+                key=lambda item: (
+                    item.geometry.time_range[0]
+                    if item.geometry.time_range
+                    else placeholder_datetime
+                ),
                 reverse=False,
             )
 
