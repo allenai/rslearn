@@ -17,6 +17,29 @@ Authentication and dependency requirements are the same as `Sentinel2C1L2A` (opt
 `earthdaily[platform]`, `EDS_CLIENT_ID`, `EDS_SECRET`, `EDS_AUTH_URL`, `EDS_API_URL`).
 See [EarthDaily Setup](earthdaily.md).
 
+### Migrating from Planetary Computer
+
+For standard training configurations, only change the data source class:
+
+```diff
+- "class_path": "rslearn.data_sources.planetary_computer.Sentinel2"
++ "class_path": "rslearn.data_sources.earthdaily.Sentinel2L2A"
+```
+
+Existing layer band sets, uppercase `assets` values, `harmonize`, STAC query and sort
+settings, and `"ingest": false` can be reused. When `assets` is omitted, both sources
+infer the required assets from the layer's configured band sets.
+
+EarthDaily STAC items may expose common-name asset keys such as `blue`, `nir`, and
+`scl`. `Sentinel2L2A` resolves these automatically to the rslearn band names `B02`,
+`B08`, and `SCL`; canonical uppercase keys take precedence when both forms are
+present. Users should continue to reference the uppercase rslearn names in training
+configurations.
+
+Before switching, install the EarthDaily dependency and configure the credentials
+listed above. Remove any Planetary Computer-specific initialization arguments that
+are not part of the shared Sentinel-2 interface.
+
 For collection lifecycle context (`sentinel-2-c1-l2a` replacing `sentinel-2-l2a`) and
 known archive gaps, see [earthdaily.Sentinel2C1L2A](earthdaily_Sentinel2C1L2A.md#collection-status).
 
@@ -77,11 +100,15 @@ known archive gaps, see [earthdaily.Sentinel2C1L2A](earthdaily_Sentinel2C1L2A.md
 
 ### Harmonization
 
-Harmonization first tries to build the callback from Sentinel-2 metadata XML
-(`product_metadata`) using `get_harmonize_callback(...)` when that asset is present.
+When `harmonize=true`, rslearn first checks the STAC
+`earthsearch:boa_offset_applied` property. If it is `true`, the Earth Search COG has
+already been harmonized and no further offset is applied. Otherwise, harmonization
+tries to build the callback from Sentinel-2 metadata XML (`product_metadata`) using
+`get_harmonize_callback(...)`.
 
 If metadata is missing or cannot be read while `harmonize=true`, rslearn raises
-that error instead of silently skipping harmonization.
+that error instead of silently skipping harmonization, unless the STAC property
+already confirms that the offset was applied.
 
 If metadata XML is available but does not itself indicate whether an offset is
 present, rslearn falls back to the processing baseline encoded in STAC
