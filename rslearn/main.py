@@ -40,6 +40,7 @@ from rslearn.dataset.storage.migrate import migrate_window_storage
 from rslearn.log_utils import get_logger
 from rslearn.tile_stores import get_tile_store_with_layer
 from rslearn.utils import Projection, STGeometry
+from rslearn.utils.mp import star_imap_unordered
 
 logger = get_logger(__name__)
 
@@ -654,10 +655,31 @@ def dataset_prepare() -> None:
 
 
 def _load_window_layer_datas(
-    window: Window,
+    window: Window, relevant_layers: frozenset[str]
 ) -> tuple[Window, dict[str, WindowLayerData]]:
-    # Helper for IngestHandler to use with multiprocessing.
-    return window, window.load_layer_datas()
+    """Load a window's layer datas, keeping only the relevant layers.
+
+    Helper for IngestHandler to use with multiprocessing.
+
+    Only the layer datas for the provided relevant layers are kept. A window's
+    items.json may contain many layers, but ingest only needs the layers that are
+    enabled in the dataset config, so dropping the rest here avoids holding all of
+    them in memory across all windows.
+
+    Args:
+        window: the window to load layer datas for.
+        relevant_layers: the layer names to keep.
+
+    Returns:
+        a tuple of the window and its filtered layer datas.
+    """
+    layer_datas = window.load_layer_datas()
+    filtered_layer_datas = {
+        layer_name: layer_data
+        for layer_name, layer_data in layer_datas.items()
+        if layer_name in relevant_layers
+    }
+    return window, filtered_layer_datas
 
 
 class IngestHandler:
@@ -773,10 +795,20 @@ class IngestHandler:
     def _load_layer_data_for_windows(
         self, windows: list[Window], workers: int
     ) -> list[tuple[Window, dict[str, WindowLayerData]]]:
+        if self.dataset is None:
+            raise ValueError("dataset not set")
+        # Only keep the layer datas for layers that are enabled in the dataset config.
+        relevant_layers = frozenset(self.dataset.layers.keys())
         if workers == 0:
-            return [(_load_window_layer_datas(window)) for window in windows]
+            return [
+                _load_window_layer_datas(window=window, relevant_layers=relevant_layers)
+                for window in windows
+            ]
+        kwargs_list = [
+            dict(window=window, relevant_layers=relevant_layers) for window in windows
+        ]
         p = multiprocessing.Pool(workers)
-        outputs = p.imap_unordered(_load_window_layer_datas, windows)
+        outputs = star_imap_unordered(p, _load_window_layer_datas, kwargs_list)
         windows_and_layer_datas = []
         for window, layer_datas in tqdm.tqdm(
             outputs, total=len(windows), desc="Loading window layer datas"
