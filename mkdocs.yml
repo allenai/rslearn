@@ -136,6 +136,7 @@ nav:
           - data_sources/google_earth_engine_GoogleSatelliteEmbeddings.md
           - data_sources/hf_srtm_SRTM.md
           - data_sources/local_files_LocalFiles.md
+          - data_sources/meta_canopy_height_MetaCanopyHeightV2.md
           - data_sources/nasa_hls_Hls2.md
           - data_sources/openstreetmap_OpenStreetMap.md
           - data_sources/planetary_computer_CopDemGlo30.md

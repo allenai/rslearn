@@ -11,7 +11,6 @@ https://arxiv.org/abs/2603.06382 for details.
 """
 
 import json
-from datetime import timedelta
 
 import boto3
 import botocore
@@ -82,18 +81,15 @@ class MetaCanopyHeightV2(DirectMaterializeDataSource[Item], ItemLookupDataSource
     def __init__(
         self,
         metadata_cache_dir: str,
-        timeout: timedelta = timedelta(seconds=60),
         context: DataSourceContext = DataSourceContext(),
     ) -> None:
         """Create a new MetaCanopyHeightV2 instance.
 
         Args:
             metadata_cache_dir: directory to cache the tiles.geojson index.
-            timeout: timeout for HTTP requests.
             context: the data source context.
         """
         super().__init__(asset_bands={"chm": [CANOPY_HEIGHT_BAND]})
-        self.timeout = timeout
 
         if context.ds_path is not None:
             self._cache_dir = join_upath(context.ds_path, metadata_cache_dir)
