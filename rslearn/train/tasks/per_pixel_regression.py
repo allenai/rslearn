@@ -345,8 +345,8 @@ class PerPixelRegressionMetricWrapper(Metric):
             assert preds.shape[1] == 1
             preds = preds[:, 0, :, :]
         mask = torch.stack([target["valid"].get_hw_tensor() > 0 for target in targets])
-        preds = preds[mask]
-        labels = labels[mask]
+        preds = preds[mask] / self.scale_factor
+        labels = labels[mask] / self.scale_factor
         if len(preds) == 0:
             return
 
