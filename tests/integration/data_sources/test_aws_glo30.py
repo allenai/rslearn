@@ -1,33 +1,52 @@
 """Mocked integration tests for the Copernicus GLO-30 data source."""
 
+import io
 import pathlib
+from typing import Any
+from unittest.mock import MagicMock
 
+import boto3
 import numpy as np
 import pytest
-from pytest_httpserver import HTTPServer
+import rasterio
 from rasterio.crs import CRS
 from upath import UPath
 
-from rslearn.config import QueryConfig, SpaceMode
-from rslearn.data_sources.aws_glo30 import CopernicusGLO30, _tile_name
-from rslearn.tile_stores import DefaultTileStore, TileStoreWithLayer
+from rslearn.config import (
+    BandSetConfig,
+    DType,
+    LayerConfig,
+    LayerType,
+    QueryConfig,
+    SpaceMode,
+)
+from rslearn.data_sources import Item
+from rslearn.data_sources.aws_glo30 import GLO30_BUCKET, CopernicusGLO30, _tile_name
+from rslearn.dataset import Window
+from rslearn.dataset.storage.file import FileWindowStorage
+from rslearn.dataset.window_data_storage.per_item_group import (
+    PerItemGroupStorageFactory,
+)
 from rslearn.utils.geometry import Projection, STGeometry
 from rslearn.utils.raster_array import RasterArray
 from rslearn.utils.raster_format import GeotiffRasterFormat
 
+# Seattle (lon=-122.33, lat=47.61) falls in the N47/W123 tile.
+TILE_LAT = 47
+TILE_LON = -123
+MIN_ELEVATION = 500.0
+MAX_ELEVATION = 1400.0
 
-def _make_glo30_geotiff(
-    path: pathlib.Path, lat: int = 47, lon: int = -123
-) -> pathlib.Path:
+
+def _make_glo30_geotiff(path: pathlib.Path) -> UPath:
     """Create a small GLO-30-like GeoTIFF covering one 1x1 degree cell.
 
-    The DEM has a simple gradient (elevation increases northward) so that slope
-    and aspect are nonzero and testable.
+    The DEM has a simple gradient (elevation increases northward) so that derived
+    terrain values would be nonzero.
     """
-    west, south, east, north = lon, lat, lon + 1, lat + 1
+    west, south, east, north = TILE_LON, TILE_LAT, TILE_LON + 1, TILE_LAT + 1
     width, height = 10, 10
-    x_res = 0.1
-    y_res = -0.1
+    x_res, y_res = 0.1, -0.1
     projection = Projection(CRS.from_epsg(4326), x_res, y_res)
     bounds = (
         int(west / x_res),
@@ -36,14 +55,14 @@ def _make_glo30_geotiff(
         int(south / y_res),
     )
 
-    # Gradient: elevation increases from south to north (row 0 = north = highest).
+    # Row 0 is north and highest.
     data = np.zeros((1, height, width), dtype=np.float32)
     for row in range(height):
         data[0, row, :] = (height - 1 - row) * 100.0
-    data[0] += 500.0
+    data[0] += MIN_ELEVATION
 
     raster_dir = UPath(path / "glo30_raster")
-    tile_name = _tile_name(lat, lon)
+    tile_name = _tile_name(TILE_LAT, TILE_LON)
     GeotiffRasterFormat().encode_raster(
         raster_dir,
         projection,
@@ -54,136 +73,103 @@ def _make_glo30_geotiff(
     return raster_dir / f"{tile_name}.tif"
 
 
-def _setup_mock_server(
-    httpserver: HTTPServer,
-    tif_path: pathlib.Path,
-    lat: int = 47,
-    lon: int = -123,
-) -> None:
-    """Register a mock endpoint for a GLO-30 tile on the httpserver."""
-    tile_name = _tile_name(lat, lon)
-    url_path = f"/{tile_name}/{tile_name}.tif"
-
-    with open(tif_path, "rb") as f:
-        tif_data = f.read()
-    httpserver.expect_request(url_path, method="GET").respond_with_data(
-        tif_data, content_type="image/tiff"
-    )
+def _mock_boto3(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Patch boto3 so the tileList.txt download returns just our test tile."""
+    mock_s3 = MagicMock()
+    mock_s3.get_object.return_value = {
+        "Body": io.BytesIO(f"{_tile_name(TILE_LAT, TILE_LON)}\n".encode())
+    }
+    monkeypatch.setattr(boto3, "client", lambda *a, **kw: mock_s3)
 
 
-def test_ingest_elevation_only(
-    tmp_path: pathlib.Path,
-    seattle2020: STGeometry,
-    httpserver: HTTPServer,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """Test ingesting elevation-only from GLO-30 with mocked HTTP server."""
-    tif_path = _make_glo30_geotiff(tmp_path)
-    _setup_mock_server(httpserver, tif_path)
+def _redirect_rasterio(monkeypatch: pytest.MonkeyPatch, local_tif: UPath) -> None:
+    """Redirect reads of the GLO-30 bucket to a local GeoTIFF."""
+    original_open = rasterio.open
 
-    monkeypatch.setattr(CopernicusGLO30, "BASE_URL", httpserver.url_for("/"))
+    def mock_open(url: Any, *args: Any, **kwargs: Any) -> Any:
+        if GLO30_BUCKET in str(url):
+            return original_open(str(local_tif), *args, **kwargs)
+        return original_open(url, *args, **kwargs)
 
-    ds = CopernicusGLO30()
-    # Override band_names to elevation only for this test.
-    ds.band_names = ["elevation"]
-    ds._needs_slope = False
-    ds._needs_aspect = False
+    monkeypatch.setattr(rasterio, "open", mock_open)
 
+
+@pytest.fixture
+def data_source(
+    tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch
+) -> CopernicusGLO30:
+    _mock_boto3(monkeypatch)
+    _redirect_rasterio(monkeypatch, _make_glo30_geotiff(tmp_path))
+    return CopernicusGLO30(metadata_cache_dir=str(tmp_path / "cache"))
+
+
+def _get_item(data_source: CopernicusGLO30, geometry: STGeometry) -> Item:
     query_config = QueryConfig(space_mode=SpaceMode.MOSAIC, max_matches=1)
-    item_groups = ds.get_items([seattle2020], query_config)[0]
+    item_groups = data_source.get_items([geometry], query_config)[0]
     assert len(item_groups) == 1
-
     items = item_groups[0].items
-    # Seattle (lon=-122.33, lat=47.61) falls in the N47/W123 tile.
-    matching = [it for it in items if "N47" in it.name and "W123" in it.name]
-    assert len(matching) >= 1
-    item = matching[0]
-
-    tile_store_dir = UPath(tmp_path / "tiles")
-    tile_store = DefaultTileStore(str(tile_store_dir))
-    tile_store.set_dataset_path(tile_store_dir)
-    layer_name = "layer"
-
-    ds.ingest(
-        TileStoreWithLayer(tile_store, layer_name),
-        [item],
-        [[seattle2020]],
-    )
-    assert tile_store.is_raster_ready(layer_name, item, ["elevation"])
+    assert len(items) == 1
+    return items[0]
 
 
-def test_ingest_with_slope_aspect(
-    tmp_path: pathlib.Path,
-    seattle2020: STGeometry,
-    httpserver: HTTPServer,
-    monkeypatch: pytest.MonkeyPatch,
+def test_direct_materialize(
+    data_source: CopernicusGLO30, seattle2020: STGeometry
 ) -> None:
-    """Test ingesting elevation + slope + aspect from GLO-30."""
-    tif_path = _make_glo30_geotiff(tmp_path)
-    _setup_mock_server(httpserver, tif_path)
+    """read_raster should return elevation without any ingest step."""
+    item = _get_item(data_source, seattle2020)
+    assert item.name == _tile_name(TILE_LAT, TILE_LON)
 
-    monkeypatch.setattr(CopernicusGLO30, "BASE_URL", httpserver.url_for("/"))
-
-    ds = CopernicusGLO30()
-    # Default band_names should include all three.
-    assert ds.band_names == ["elevation", "slope", "aspect"]
-
-    query_config = QueryConfig(space_mode=SpaceMode.MOSAIC, max_matches=1)
-    item_groups = ds.get_items([seattle2020], query_config)[0]
-    items = item_groups[0].items
-    matching = [it for it in items if "N47" in it.name and "W123" in it.name]
-    item = matching[0]
-
-    tile_store_dir = UPath(tmp_path / "tiles")
-    tile_store = DefaultTileStore(str(tile_store_dir))
-    tile_store.set_dataset_path(tile_store_dir)
-    layer_name = "layer"
-
-    ds.ingest(
-        TileStoreWithLayer(tile_store, layer_name),
-        [item],
-        [[seattle2020]],
+    bounds = (
+        int(seattle2020.shp.bounds[0]),
+        int(seattle2020.shp.bounds[1]),
+        int(seattle2020.shp.bounds[2]),
+        int(seattle2020.shp.bounds[3]),
     )
-    assert tile_store.is_raster_ready(
-        layer_name, item, ["elevation", "slope", "aspect"]
+    array = data_source.read_raster(
+        layer_name="layer",
+        item=item,
+        bands=["elevation"],
+        projection=seattle2020.projection,
+        bounds=bounds,
     )
+    chw = array.get_chw_array()
+    assert chw.shape[0] == 1
+    assert (chw >= MIN_ELEVATION).all()
+    assert (chw <= MAX_ELEVATION).all()
 
 
-def test_ingest_skips_404(
-    tmp_path: pathlib.Path,
-    seattle2020: STGeometry,
-    httpserver: HTTPServer,
-    monkeypatch: pytest.MonkeyPatch,
+def test_materialize_window(
+    tmp_path: pathlib.Path, data_source: CopernicusGLO30, seattle2020: STGeometry
 ) -> None:
-    """Tiles that return 404 (e.g. ocean) should be skipped gracefully."""
-    tile_name = _tile_name(47, -123)
-    url_path = f"/{tile_name}/{tile_name}.tif"
-    httpserver.expect_request(url_path, method="GET").respond_with_data(
-        b"Not Found", status=404
-    )
-
-    monkeypatch.setattr(CopernicusGLO30, "BASE_URL", httpserver.url_for("/"))
-
-    ds = CopernicusGLO30()
-    ds.band_names = ["elevation"]
-    ds._needs_slope = False
-    ds._needs_aspect = False
-
+    """The layer should materialize end to end with ingest disabled."""
     query_config = QueryConfig(space_mode=SpaceMode.MOSAIC, max_matches=1)
-    item_groups = ds.get_items([seattle2020], query_config)[0]
-    items = item_groups[0].items
-    matching = [it for it in items if "N47" in it.name and "W123" in it.name]
-    item = matching[0]
+    item_groups = data_source.get_items([seattle2020], query_config)[0]
 
-    tile_store_dir = UPath(tmp_path / "tiles")
-    tile_store = DefaultTileStore(str(tile_store_dir))
-    tile_store.set_dataset_path(tile_store_dir)
-    layer_name = "layer"
-
-    # Should not raise — just logs a warning and skips.
-    ds.ingest(
-        TileStoreWithLayer(tile_store, layer_name),
-        [item],
-        [[seattle2020]],
+    layer_config = LayerConfig(
+        type=LayerType.RASTER,
+        band_sets=[BandSetConfig(dtype=DType.FLOAT32, bands=["elevation"])],
     )
-    assert not tile_store.is_raster_ready(layer_name, item, ["elevation"])
+    bounds = (
+        int(seattle2020.shp.bounds[0]),
+        int(seattle2020.shp.bounds[1]),
+        int(seattle2020.shp.bounds[2]),
+        int(seattle2020.shp.bounds[3]),
+    )
+    window = Window(
+        storage=FileWindowStorage(UPath(tmp_path / "rslearn_dataset")),
+        group="default",
+        name="default",
+        projection=seattle2020.projection,
+        bounds=bounds,
+        time_range=seattle2020.time_range,
+        data_factory=PerItemGroupStorageFactory(),
+    )
+    window.save()
+
+    data_source.materialize(
+        window,
+        [group.items for group in item_groups],
+        "layer",
+        layer_config,
+    )
+    assert window.is_layer_completed("layer")
