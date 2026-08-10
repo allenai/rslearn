@@ -4,9 +4,9 @@ from dataclasses import dataclass
 from typing import Any
 
 import torch
+import wandb
 from torchmetrics import Metric
 
-import wandb
 from rslearn.log_utils import get_logger
 
 logger = get_logger(__name__)
