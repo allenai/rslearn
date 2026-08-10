@@ -729,17 +729,9 @@ If enabled, model management will:
 5. Save `config.yaml` to the project directory and record the model config with the
    experiment run.
 
-W&B is the default experiment logger. When Lightning's `MLFlowLogger` is configured,
-model management fills in the MLflow experiment and run names and reconnects to the
-saved run when training resumes. `MLFLOW_TRACKING_URI` selects the MLflow tracking
-server; it does not control where rslearn stores its managed config and checkpoints.
+The W&B run or MLflow experiment is resumed if training is stopped and restarted. `MLFLOW_TRACKING_URI` selects the MLflow tracking server.
 
-The resolved config is written under `trainer.default_root_dir` independently of the
-logger's `save_dir`. Consequently, W&B and MLflow use the same project directory
-layout, including when `management_dir` is an fsspec-compatible URI. For example,
-`memory://rslearn-runs` can be used for ephemeral tests. Cloud URLs require the
-corresponding fsspec backend. When experiment logging is enabled, the config is also
-recorded in W&B or uploaded to MLflow as `config.json`.
+The project directory layout is consistent regardless of the selected logger: {project_dir}/config.yaml stores the model config, and {project_dir}/last.ckpt and {project_dir}/best.ckpt store the latest and best checkpoints, respectively.
 
 To save checkpoints, add a `ManagedBestLastCheckpoint` callback to `trainer.callbacks`.
 This callback automatically determines its checkpoint directory from

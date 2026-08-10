@@ -10,7 +10,6 @@ import tempfile
 
 import fsspec
 import jsonargparse
-import wandb
 from lightning.fabric.utilities.cloud_io import get_filesystem
 from lightning.pytorch import LightningDataModule, LightningModule, Trainer
 from lightning.pytorch.callbacks import Callback
@@ -23,6 +22,7 @@ from lightning.pytorch.loggers import MLFlowLogger
 from lightning.pytorch.utilities import rank_zero_only
 from upath import UPath
 
+import wandb
 from rslearn.arg_parser import RslearnArgumentParser
 from rslearn.log_utils import get_logger
 from rslearn.utils.fsspec import open_atomic
