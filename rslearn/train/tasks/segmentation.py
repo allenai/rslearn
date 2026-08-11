@@ -759,10 +759,12 @@ class MeanIoUMetric(Metric):
             intersection = self.intersections[cls_idx]
             union = self.unions[cls_idx]
 
-            if union == 0 and self.ignore_missing_classes:
-                continue
-
-            score = intersection / union
+            if union == 0:
+                if self.ignore_missing_classes:
+                    continue
+                score = torch.zeros_like(intersection)
+            else:
+                score = intersection / union
             cls_scores[f"mean_iou/cls_{cls_idx}"] = score
             valid_scores.append(score)
 
