@@ -39,10 +39,10 @@ Here is a summary of the configuration options:
       transforms:
         - class_path: rslearn.train.transforms.concatenate.Concatenate
           init_args:
-            # This is a map from selectors to a list of band indices that should be
-            # taken from that image. The images across the selectors are concatenated
-            # together. An empty list of band indices can be used to indicate that all
-            # bands from that image should be retained.
+            # This is a map from selectors to a list of band indices that should
+            # be taken from that image. The images across the selectors are
+            # concatenated together. An empty list of band indices can be used
+            # to indicate that all bands from that image should be retained.
             selections:
               # Take first three bands from Sentinel-2.
               sentinel2: [0, 1, 2]
@@ -85,15 +85,16 @@ Here is a summary of the configuration options:
         # ...
         - class_path: rslearn.train.transforms.flip.Flip
           init_args:
-            # Selectors for images that should be flipped. It defaults to ["image"].
+            # Selectors for images that should be flipped. It defaults to
+            # ["image"].
             image_selectors: ["image"]
-            # Selectors for DetectionTask targets that should be flipped. Note that the
-            # DetectionTask targets are a dict with keys for boxes, labels, etc., but
-            # the selectors here should correspond to the overall dict. The example
-            # here would work for single-task training; if using MultiTask, then if the
-            # detection task name is "detect", you can set box_selectors to
-            # ["target/detect"] (not ["target/detect/boxes"]).
-            # The default is an empty list.
+            # Selectors for DetectionTask targets that should be flipped. Note
+            # that the DetectionTask targets are a dict with keys for boxes,
+            # labels, etc., but the selectors here should correspond to the
+            # overall dict. The example here would work for single-task
+            # training; if using MultiTask, then if the detection task name is
+            # "detect", you can set box_selectors to ["target/detect"] (not
+            # ["target/detect/boxes"]). The default is an empty list.
             box_selectors: ["target/"]
 ```
 
@@ -104,10 +105,11 @@ Here is an example to flip an input image along with segmentation targets:
         # ...
         - class_path: rslearn.train.transforms.flip.Flip
           init_args:
-            # Similar to DetectionTask, the SegmentationTask targets are a dict with
-            # the "classes" and "valid" keys. Unlike with box_selectors, we need to
-            # specify those images directly here. With MultiTask, there would be
-            # another level in the dict, e.g. "target/segment_task_name/classes".
+            # Similar to DetectionTask, the SegmentationTask targets are a dict
+            # with the "classes" and "valid" keys. Unlike with box_selectors, we
+            # need to specify those images directly here. With MultiTask, there
+            # would be another level in the dict, e.g.
+            # "target/segment_task_name/classes".
             image_selectors:
                 - image
                 - target/classes
@@ -130,8 +132,8 @@ Here is a summary of the configuration options:
             selectors: ["image"]
             # The selector for the image to use as the mask.
             mask_selector: "mask"
-            # The mask value. Each image in selectors will be set to this value where
-            # the mask_selector image is 0.
+            # The mask value. Each image in selectors will be set to this value
+            # where the mask_selector image is 0.
             mask_value: 0
 ```
 
@@ -227,28 +229,29 @@ Here is a summary of the configuration options:
       transforms:
         - class_path: rslearn.train.transforms.normalize.Normalize
           init_args:
-            # The mean and standard deviation for z-score normalization.
-            # The image will be normalized as (image - mean) / std.
-            # Both mean and std can either be one value (to apply on all bands), or a
-            # list with one value per band.
+            # The mean and standard deviation for z-score normalization. The
+            # image will be normalized as (image - mean) / std. Both mean and
+            # std can either be one value (to apply on all bands), or a list
+            # with one value per band.
             mean: 10
             std: 200
-            # Optionally clip the result to this range after the linear rescaling. The
-            # default is null to not perform any clipping.
+            # Optionally clip the result to this range after the linear
+            # rescaling. The default is null to not perform any clipping.
             valid_range: [0, 1]
             # The image selectors to apply the normalization on. The default is
             # ["image"].
             selectors: ["image"]
-            # Optionally limit the normalization to specific bands. This list specifies
-            # the bands to normalize. If mean/std are a list, they should have the same
-            # size as this bands list.
+            # Optionally limit the normalization to specific bands. This list
+            # specifies the bands to normalize. If mean/std are a list, they
+            # should have the same size as this bands list.
             bands: [0, 1, 2]
-            # If normalizing specific bands in image time series, num_bands should be
-            # set to the number of bands at each timestep. If num_bands is set, then
-            # the bands is repeated for each timestep, e.g. if bands=[2] then we apply
-            # normalization on image[2], image[2+num_bands], etc. num_bands can also be
-            # set without setting bands if mean and std are lists, in which case those
-            # means and stds are repeated for each timestep.
+            # If normalizing specific bands in image time series, num_bands
+            # should be set to the number of bands at each timestep. If
+            # num_bands is set, then the bands is repeated for each timestep,
+            # e.g. if bands=[2] then we apply normalization on image[2],
+            # image[2+num_bands], etc. num_bands can also be set without setting
+            # bands if mean and std are lists, in which case those means and
+            # stds are repeated for each timestep.
             num_bands: 9
 ```
 
@@ -262,11 +265,11 @@ Here is a summary of the configuration options:
       transforms:
         - class_path: rslearn.train.transforms.pad.Pad
           init_args:
-            # The size to pad to, or a min/max of pad sizes. If the image is larger
-            # than this size, it is cropped instead.
+            # The size to pad to, or a min/max of pad sizes. If the image is
+            # larger than this size, it is cropped instead.
             size: 32
-            # "topleft" (default) to only apply padding on the bottom and right sides,
-            # or "center" to apply padding equally on all sides.
+            # "topleft" (default) to only apply padding on the bottom and right
+            # sides, or "center" to apply padding equally on all sides.
             mode: "topleft"
             # The image and box selectors to apply padding on.
             image_selectors: ["image"]
@@ -301,11 +304,12 @@ Here is a summary of the configuration options:
             band_indices: [0, 1, 2]
             # The selector to read the input image, default "image".
             input_selector: "image"
-            # The output selector under which to save the image, default "image".
+            # The output selector under which to save the image, default
+            # "image".
             output_selector: "image"
-            # Optional number of bands per image, to distinguish between stacked images
-            # in an image time series. If set, then the band_indices are selected for
-            # each image in the time series.
+            # Optional number of bands per image, to distinguish between stacked
+            # images in an image time series. If set, then the band_indices are
+            # selected for each image in the time series.
             num_bands_per_timestep: 9
 ```
 
@@ -328,3 +332,40 @@ Here is a summary of the configuration options:
             # decibels.
             epsilon: 1e-6
 ```
+
+## ElevationToSlopeAspect
+
+The `ElevationToSlopeAspect` transform derives terrain slope and aspect from a
+single-band elevation image, such as the one provided by
+[aws_glo30.CopernicusGLO30](data_sources/aws_glo30_CopernicusGLO30.md). Slope is in
+degrees [0, 90) and aspect is the compass direction of steepest descent in degrees
+[0, 360), with a configurable value for flat pixels where aspect is undefined.
+
+Since the transform runs after materialization, the image is already in the window's
+projection, so the pixel spacing must be provided in meters.
+
+Here is a summary of the configuration options:
+
+```yaml
+      transforms:
+        - class_path: rslearn.train.transforms.terrain.ElevationToSlopeAspect
+          init_args:
+            # The size of a pixel in meters in the window's projection.
+            pixel_size_m: 10
+            # The selector containing the elevation image, default "elevation".
+            input_selector: "elevation"
+            # The output selector, defaults to the input selector.
+            output_selector: "elevation"
+            # The bands to emit, in order. Choose from elevation, slope, and aspect.
+            bands: ["elevation", "slope", "aspect"]
+            # The aspect value to use for flat pixels.
+            flat_aspect_value: -1.0
+```
+
+Gradients use central differences in the interior and one-sided differences on the
+image border, so slope and aspect on the outermost pixel ring are less accurate than
+the interior.
+
+Nodata is assumed to be represented as NaN in the input elevation. NaN pixels produce
+NaN slope and aspect, and since the gradients read neighboring pixels, each NaN also
+invalidates the slope and aspect of its four orthogonally adjacent pixels.

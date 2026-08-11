@@ -3,7 +3,7 @@
 This tutorial shows how to compute OlmoEarth embeddings on a target location and time
 of interest. We will use rslearn to materialize satellite images that we will then pass
 to the OlmoEarth encoder. For an introduction to rslearn, see
-[the main README](../../README.md) and [CoreConcepts](../CoreConcepts.md).
+[the main README](https://github.com/allenai/rslearn/blob/master/README.md) and [CoreConcepts](../CoreConcepts.md).
 
 We proceed in three steps:
 
@@ -46,12 +46,11 @@ pre-training:
       "band_sets": [{
           "bands": ["vv", "vh"],
           "dtype": "float32",
-          "nodata_vals": [-32768, -32768]
+          "nodata_value": -32768
       }],
       "data_source": {
         "class_path": "rslearn.data_sources.planetary_computer.Sentinel1",
         "init_args": {
-          "cache_dir": "cache/planetary_computer",
           "query": {
             "sar:instrument_mode": {"eq": "IW"},
             "sar:polarizations": {"eq": ["VV", "VH"]}
@@ -74,7 +73,6 @@ pre-training:
       "data_source": {
         "class_path": "rslearn.data_sources.planetary_computer.Sentinel2",
         "init_args": {
-          "cache_dir": "cache/planetary_computer",
           "harmonize": true,
           "sort_by": "eo:cloud_cover"
         },
@@ -160,8 +158,8 @@ model:
               model_id: OLMOEARTH_V1_BASE
               patch_size: 4
         decoder:
-          # The EmbeddingHead is a wrapper that works with EmbeddingTask below to save
-          # the embeddings computed by the encoder.
+          # The EmbeddingHead is a wrapper that works with EmbeddingTask below
+          # to save the embeddings computed by the encoder.
           - class_path: rslearn.train.tasks.embedding.EmbeddingHead
     # The optimizer here is not used but needs to be passed.
     optimizer:
@@ -171,8 +169,8 @@ data:
   init_args:
     path: ${DATASET_PATH}
     inputs:
-      # Read the Sentinel-2 and Sentinel-1 images materialized above.
-      # You may need to adjust the number of layers below to match your time range.
+      # Read the Sentinel-2 and Sentinel-1 images materialized above. You may
+      # need to adjust the number of layers below to match your time range.
       sentinel2_l2a:
         data_type: "raster"
         layers: ["sentinel2_l2a", "sentinel2_l2a.1", "sentinel2_l2a.2", "sentinel2_l2a.3"]
@@ -190,8 +188,8 @@ data:
         dtype: FLOAT32
         load_all_layers: true
     task:
-      # The EmbeddingTask is a dummy task setup so that the output feature map can be
-      # written to the rslearn dataset during `model predict`.
+      # The EmbeddingTask is a dummy task setup so that the output feature map
+      # can be written to the rslearn dataset during `model predict`.
       class_path: rslearn.train.tasks.embedding.EmbeddingTask
     batch_size: 8
     num_workers: 32
@@ -202,34 +200,36 @@ data:
             band_names:
               sentinel2_l2a: ["B02", "B03", "B04", "B08", "B05", "B06", "B07", "B8A", "B11", "B12", "B01", "B09"]
               sentinel1: ["vv", "vh"]
-      # We apply sliding-window inference (using 64x64 input crops) with overlap.
+      # We apply sliding-window inference (using 64x64 input crops) with
+      # overlap.
       load_all_crops: true
       # This is the crop size for inference.
       crop_size: 64
       overlap_pixels: 32
 trainer:
   callbacks:
-   # The RslearnWriter will write our embeddings to a layer in the rslearn dataset.
+   # The RslearnWriter will write our embeddings to a layer in the rslearn
+   # dataset.
     - class_path: rslearn.train.prediction_writer.RslearnWriter
       init_args:
-        # This references the "embeddings" layer that we will add to our dataset config
-        # file to store the embeddings.
+        # This references the "embeddings" layer that we will add to our dataset
+        # config file to store the embeddings.
         output_layer: embeddings
         merger:
-          # The RasterMerge will merge the outputs across the different sliding-window
-          # crops that pertain to the same rslearn windows.
+          # The RasterMerge will merge the outputs across the different
+          # sliding-window crops that pertain to the same rslearn windows.
           class_path: rslearn.train.prediction_writer.RasterMerger
           init_args:
-            # This removes the border from the overlap_pixels. With model patch size 4
-            # and input crop size 64, the model produces a 16x16 output. We have
-            # overlap_pixels=32 at input resolution, which is 8 pixels at output
-            # resolution, so we remove 4 pixels from each side.
+            # This removes the border from the overlap_pixels. With model patch
+            # size 4 and input crop size 64, the model produces a 16x16 output.
+            # We have overlap_pixels=32 at input resolution, which is 8 pixels
+            # at output resolution, so we remove 4 pixels from each side.
             overlap_pixels: 8
-            # This lets the merger know what output resolution to expect relative to
-            # the window's resolution. Here, our output will be 1/patch_size relative
-            # to the window resolution (input resolution), since we compute one
-            # embedding per patch in the input, so we set the downsample_factor to
-            # patch_size.
+            # This lets the merger know what output resolution to expect
+            # relative to the window's resolution. Here, our output will be
+            # 1/patch_size relative to the window resolution (input resolution),
+            # since we compute one embedding per patch in the input, so we set
+            # the downsample_factor to patch_size.
             downsample_factor: 4
 ```
 

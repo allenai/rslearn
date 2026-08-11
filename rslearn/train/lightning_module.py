@@ -6,7 +6,8 @@ from typing import Any
 
 import lightning as L
 import torch
-import wandb
+from lightning.pytorch.loggers import MLFlowLogger, WandbLogger
+from lightning.pytorch.utilities import rank_zero_only
 from lightning.pytorch.utilities.types import OptimizerLRSchedulerConfig
 from PIL import Image
 from upath import UPath
@@ -216,8 +217,9 @@ class RslearnLightningModule(L.LightningModule):
             # Fail silently for single-dataset case, which is okay
             pass
 
+    @rank_zero_only
     def _log_non_scalar_metric(self, name: str, value: NonScalarMetricOutput) -> None:
-        """Log a non-scalar metric to wandb.
+        """Log a non-scalar metric to each supported Lightning logger.
 
         Args:
             name: the metric name (e.g., "val_confusion_matrix")
@@ -228,14 +230,27 @@ class RslearnLightningModule(L.LightningModule):
         if self.trainer.sanity_checking:
             return
 
-        # Wandb is required for logging non-scalar metrics.
-        if not wandb.run:
-            logger.warning(
-                f"Weights & Biases is not initialized, skipping logging of {name}"
-            )
-            return
+        logged = False
+        for lightning_logger in self.trainer.loggers:
+            if isinstance(lightning_logger, WandbLogger):
+                # Accessing the experiment initializes the W&B run if needed.
+                _ = lightning_logger.experiment
+                value.log_to_wandb(name)
+                logged = True
+            elif isinstance(lightning_logger, MLFlowLogger):
+                run_id = lightning_logger.run_id
+                if run_id is not None:
+                    value.log_to_mlflow(
+                        name,
+                        client=lightning_logger.experiment,
+                        run_id=run_id,
+                    )
+                    logged = True
 
-        value.log_to_wandb(name)
+        if not logged:
+            logger.warning(
+                "No supported logger is initialized, skipping logging of %s", name
+            )
 
     def on_validation_epoch_end(self) -> None:
         """Compute and log validation metrics at epoch end.

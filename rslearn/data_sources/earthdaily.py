@@ -51,6 +51,7 @@ class EarthDailyItem(Item):
         asset_urls: dict[str, str],
         asset_scale_offsets: dict[str, list[dict[str, float | None]]] | None = None,
         product_id: str | None = None,
+        boa_offset_applied: bool | None = None,
     ):
         """Creates a new EarthDailyItem.
 
@@ -63,11 +64,15 @@ class EarthDailyItem(Item):
                 "scale", "offset", and "nodata".
             product_id: optional Sentinel-2 product ID from STAC
                 `properties["sentinel:product_id"]`.
+            boa_offset_applied: whether the Sentinel-2 BOA offset has already been
+                applied to the COG, from STAC
+                `properties["earthsearch:boa_offset_applied"]`.
         """
         super().__init__(name, geometry)
         self.asset_urls = asset_urls
         self.asset_scale_offsets = asset_scale_offsets or {}
         self.product_id = product_id
+        self.boa_offset_applied = boa_offset_applied
 
     def serialize(self) -> dict[str, Any]:
         """Serializes the item to a JSON-encodable dictionary."""
@@ -75,6 +80,7 @@ class EarthDailyItem(Item):
         d["asset_urls"] = self.asset_urls
         d["asset_scale_offsets"] = self.asset_scale_offsets
         d["product_id"] = self.product_id
+        d["boa_offset_applied"] = self.boa_offset_applied
         return d
 
     @staticmethod
@@ -87,6 +93,7 @@ class EarthDailyItem(Item):
             asset_urls=d["asset_urls"],
             asset_scale_offsets=d.get("asset_scale_offsets") or {},
             product_id=d.get("product_id"),
+            boa_offset_applied=d.get("boa_offset_applied"),
         )
 
 
@@ -178,6 +185,23 @@ class EarthDaily(DataSource, TileStore):
         self.collection: pystac_client.CollectionClient | None = None
         self._nodata_cache: dict[str, float | None] = {}
 
+    def _get_asset_key_aliases(self, asset_key: str) -> tuple[str, ...]:
+        """Return STAC asset keys to try, in preference order."""
+        return (asset_key,)
+
+    def _resolve_stac_asset_key(
+        self, stac_item: pystac.Item, asset_key: str
+    ) -> str | None:
+        """Resolve a configured asset key to a key present on a STAC item."""
+        return next(
+            (
+                alias
+                for alias in self._get_asset_key_aliases(asset_key)
+                if alias in stac_item.assets
+            ),
+            None,
+        )
+
     def _load_client(
         self,
     ) -> tuple[EDSClient, pystac_client.Client, pystac_client.CollectionClient]:
@@ -222,10 +246,17 @@ class EarthDaily(DataSource, TileStore):
         geom = STGeometry(WGS84_PROJECTION, shp, time_range)
         asset_urls: dict[str, str] = {}
         asset_scale_offsets: dict[str, list[dict[str, float | None]]] = {}
-        for asset_key, asset_obj in stac_item.assets.items():
+        resolved_assets: list[tuple[str, pystac.Asset]] = []
+        for asset_key in self.asset_bands:
+            stac_asset_key = self._resolve_stac_asset_key(stac_item, asset_key)
+            if stac_asset_key is not None:
+                resolved_assets.append((asset_key, stac_item.assets[stac_asset_key]))
+        for asset_key in self.METADATA_ASSET_KEYS:
+            if asset_key in stac_item.assets:
+                resolved_assets.append((asset_key, stac_item.assets[asset_key]))
+
+        for asset_key, asset_obj in resolved_assets:
             is_metadata_asset = asset_key in self.METADATA_ASSET_KEYS
-            if asset_key not in self.asset_bands and not is_metadata_asset:
-                continue
 
             href: str | None = None
             alt = asset_obj.extra_fields.get("alternate")
@@ -288,12 +319,20 @@ class EarthDaily(DataSource, TileStore):
                 product_id = raw_product_id
                 break
 
+        raw_boa_offset_applied = stac_item.properties.get(
+            "earthsearch:boa_offset_applied"
+        )
+        boa_offset_applied = (
+            raw_boa_offset_applied if isinstance(raw_boa_offset_applied, bool) else None
+        )
+
         return EarthDailyItem(
             stac_item.id,
             geom,
             asset_urls,
             asset_scale_offsets=asset_scale_offsets,
             product_id=product_id,
+            boa_offset_applied=boa_offset_applied,
         )
 
     def get_item_by_name(self, name: str) -> EarthDailyItem:
@@ -370,7 +409,10 @@ class EarthDaily(DataSource, TileStore):
                 for stac_item in stac_items:
                     good = True
                     for asset_key in self.asset_bands.keys():
-                        if asset_key in stac_item.assets:
+                        if (
+                            self._resolve_stac_asset_key(stac_item, asset_key)
+                            is not None
+                        ):
                             continue
                         good = False
                         break
@@ -980,6 +1022,21 @@ class Sentinel2L2A(EarthDaily):
         "SCL": ["SCL"],
         "visual": ["R", "G", "B"],
     }
+    ASSET_KEY_ALIASES = {
+        "B01": ("coastal",),
+        "B02": ("blue",),
+        "B03": ("green",),
+        "B04": ("red",),
+        "B05": ("rededge1",),
+        "B06": ("rededge2",),
+        "B07": ("rededge3",),
+        "B08": ("nir",),
+        "B8A": ("nir08",),
+        "B09": ("nir09",),
+        "B11": ("swir16",),
+        "B12": ("swir22",),
+        "SCL": ("scl",),
+    }
     NON_REFLECTANCE_ASSETS = frozenset({"SCL", "visual"})
     PROCESSING_BASELINE_PATTERN = re.compile(r"(?:^|_)N(?P<baseline>\d{4})(?:_|$)")
     HARMONIZE_PROCESSING_BASELINE = 400
@@ -1006,6 +1063,8 @@ class Sentinel2L2A(EarthDaily):
 
         Args:
             harmonize: apply processing-baseline harmonization to reflectance values.
+                Items with `earthsearch:boa_offset_applied=true` are not modified
+                because their COG pixels have already been harmonized.
             assets: optional list of asset keys to ingest. If omitted and a LayerConfig
                 is provided via context, assets are inferred from that layer's band sets.
             cloud_cover_max: max cloud cover (%) applied in searches. If set, injects
@@ -1066,6 +1125,10 @@ class Sentinel2L2A(EarthDaily):
             context=context,
         )
 
+    def _get_asset_key_aliases(self, asset_key: str) -> tuple[str, ...]:
+        """Prefer canonical keys, then fall back to STAC common-name keys."""
+        return (asset_key, *self.ASSET_KEY_ALIASES.get(asset_key, ()))
+
     def _normalize_dt(self, dt: datetime) -> datetime:
         if dt.tzinfo is None:
             return dt
@@ -1124,6 +1187,8 @@ class Sentinel2L2A(EarthDaily):
         self, item: EarthDailyItem, asset_key: str
     ) -> Callable[[npt.NDArray[Any]], npt.NDArray[Any]] | None:
         if not self.harmonize or asset_key in self.NON_REFLECTANCE_ASSETS:
+            return None
+        if item.boa_offset_applied is True:
             return None
         if item.name in self._harmonize_callback_cache:
             return self._harmonize_callback_cache[item.name]

@@ -1,13 +1,10 @@
 """Data source for raster data in ESA Copernicus API."""
 
 import functools
-import io
 import json
 import os
 import pathlib
-import shutil
 import tempfile
-import urllib.request
 import xml.etree.ElementTree as ET
 from collections.abc import Callable
 from datetime import datetime
@@ -34,14 +31,12 @@ from rslearn.utils.geometry import (
     FloatBounds,
     STGeometry,
     flatten_shape,
-    split_shape_at_antimeridian,
 )
 from rslearn.utils.grid_index import GridIndex
 from rslearn.utils.raster_array import RasterArray, RasterMetadata
 from rslearn.utils.raster_format import get_raster_projection_and_bounds
 
-SENTINEL2_TILE_URL = "https://sentiwiki.copernicus.eu/__attachments/1692737/S2A_OPER_GIP_TILPAR_MPC__20151209T095117_V20150622T000000_21000101T000000_B00.zip"
-SENTINEL2_KML_NAMESPACE = "{http://www.opengis.net/kml/2.2}"
+SENTINEL2_TILE_URL = "https://storage.googleapis.com/ai2-rslearn-projects-data/artifacts/sentinel2_tile_index.json"
 
 logger = get_logger(__name__)
 
@@ -100,78 +95,12 @@ def get_sentinel2_tile_index() -> dict[str, list[FloatBounds]]:
 
     This is a map from tile name to a list of WGS84 bounds of the tile. A tile may have
     multiple bounds if it crosses the antimeridian.
+
+    The tile index is downloaded as a JSON file from SENTINEL2_TILE_URL.
     """
-    # Identify the Sentinel-2 tile names and bounds using the KML file.
-    # First, download the zip file and extract and parse the KML.
-    buf = io.BytesIO()
-    with urllib.request.urlopen(SENTINEL2_TILE_URL) as response:
-        shutil.copyfileobj(response, buf)
-    buf.seek(0)
-    with ZipFile(buf) as zipf:
-        member_names = zipf.namelist()
-        if len(member_names) != 1:
-            raise ValueError(
-                "Sentinel-2 tile zip file unexpectedly contains more than one file"
-            )
-
-        with zipf.open(member_names[0]) as memberf:
-            tree = ET.parse(memberf)
-
-    # Map from the tile name to a list of the longitude/latitude bounds.
-    tile_index: dict[str, list[FloatBounds]] = {}
-
-    # The KML is list of Placemark so iterate over those.
-    for placemark_node in tree.iter(SENTINEL2_KML_NAMESPACE + "Placemark"):
-        # The <name> node specifies the Sentinel-2 tile name.
-        name_node = placemark_node.find(SENTINEL2_KML_NAMESPACE + "name")
-        if name_node is None or name_node.text is None:
-            raise ValueError("Sentinel-2 KML has Placemark without valid name node")
-
-        tile_name = name_node.text
-
-        # There may be one or more <coordinates> nodes depending on whether it is a
-        # MultiGeometry. Some are polygons and some are points, but generally the
-        # points just seem to be the center of the tile. So we create one polygon for
-        # each coordinate list that is not a point, union them, and then split the
-        # union geometry over the antimeridian.
-        shapes = []
-        for coord_node in placemark_node.iter(SENTINEL2_KML_NAMESPACE + "coordinates"):
-            points = []
-            # It is list of space-separated coordinates like:
-            #   180,-73.0597374076,0 176.8646237862,-72.9914734628,0 ...
-            if coord_node.text is None:
-                raise ValueError("Sentinel-2 KML has coordinates node missing text")
-
-            point_strs = coord_node.text.strip().split()
-            for point_str in point_strs:
-                parts = point_str.split(",")
-                if len(parts) != 2 and len(parts) != 3:
-                    continue
-
-                lon = float(parts[0])
-                lat = float(parts[1])
-                points.append((lon, lat))
-
-            # At least three points to get a polygon.
-            if len(points) < 3:
-                continue
-
-            shapes.append(shapely.Polygon(points))
-
-        if len(shapes) == 0:
-            raise ValueError("Sentinel-2 KML has Placemark with no coordinates")
-
-        # Now we union the shapes and split them at the antimeridian. This avoids
-        # issues where the tile bounds go from -180 to 180 longitude and thus match
-        # with anything at the same latitude.
-        union_shp = shapely.unary_union(shapes)
-        split_shapes = flatten_shape(split_shape_at_antimeridian(union_shp))
-        bounds_list: list[FloatBounds] = []
-        for shp in split_shapes:
-            bounds_list.append(shp.bounds)
-        tile_index[tile_name] = bounds_list
-
-    return tile_index
+    response = requests.get(SENTINEL2_TILE_URL, timeout=30)
+    response.raise_for_status()
+    return response.json()
 
 
 def _cache_sentinel2_tile_index(cache_dir: UPath) -> None:

@@ -4,7 +4,7 @@ In this example, we use rslearn to fine-tune [OlmoEarth](https://github.com/alle
 for segmenting land cover and crop type categories. We use labels from the USDA
 Cropland Data Layer. For the inputs, we use four Sentinel-2 images (one per month).
 
-If you are new to rslearn, you may want to read [the main README](../../README.md) or
+If you are new to rslearn, you may want to read [the main README](https://github.com/allenai/rslearn/blob/master/README.md) or
 [CoreConcepts](../CoreConcepts.md) first.
 
 There will be three steps:
@@ -40,7 +40,6 @@ configuration file to `./dataset/config.json`:
       "data_source": {
         "class_path": "rslearn.data_sources.planetary_computer.Sentinel2",
         "init_args": {
-          "cache_dir": "cache/planetary_computer",
           "harmonize": true,
           "sort_by": "eo:cloud_cover"
         },
@@ -102,14 +101,14 @@ ds_path = UPath("./dataset")
 dataset = Dataset(ds_path)
 windows = dataset.load_windows(show_progress=True, workers=32)
 for window in tqdm.tqdm(windows):
-    if hashlib.sha256(window.name.encode()).hexdigest()[0] in ["0", "1"]:
-        split = "val"
-    else:
-        split = "train"
-    if "split" in window.options and window.options["split"] == split:
-        continue
-    window.options["split"] = split
-    window.save()
+  if hashlib.sha256(window.name.encode()).hexdigest()[0] in ["0", "1"]:
+    split = "val"
+  else:
+    split = "train"
+  if "split" in window.options and window.options["split"] == split:
+    continue
+  window.options["split"] = split
+  window.save()
 ```
 
 ## Fine-tune the Model
@@ -135,14 +134,14 @@ model:
               # - OLMOEARTH_V1_BASE
               # - OLMOEARTH_V1_LARGE
               model_id: OLMOEARTH_V1_BASE
-              # The patch size should be set between 1 and 8, depending on the size of
-              # the features being predicted, and the available compute (lower patch
-              # sizes are slower).
+              # The patch size should be set between 1 and 8, depending on the
+              # size of the features being predicted, and the available compute
+              # (lower patch sizes are slower).
               patch_size: 8
         decoder:
-          # For the decoder, we apply UNetDecoder to upsample features to the input
-          # resolution. It isn't really a UNet since we only have features at one
-          # resolution.
+          # For the decoder, we apply UNetDecoder to upsample features to the
+          # input resolution. It isn't really a UNet since we only have features
+          # at one resolution.
           - class_path: rslearn.models.unet.UNetDecoder
             init_args:
               in_channels: [[8, 768]]
@@ -170,8 +169,8 @@ data:
         passthrough: true
         dtype: FLOAT32
         load_all_layers: true
-      # We also read the CDL data here. SegmentationTask expects the target to be
-      # called "targets".
+      # We also read the CDL data here. SegmentationTask expects the target to
+      # be called "targets".
       targets:
         data_type: "raster"
         layers: ["cdl"]
@@ -204,28 +203,29 @@ data:
     predict_config:
       groups: ["predict"]
       load_all_crops: true
-      # We set crop_size=128 here to support the option of using larger windows during
-      # prediction. Note that this controls the sliding window inference crop size,
-      # and we want that to match the size of our training windows.
+      # We set crop_size=128 here to support the option of using larger windows
+      # during prediction. Note that this controls the sliding window inference
+      # crop size, and we want that to match the size of our training windows.
       crop_size: 128
-      # We use some overlap when we need to apply sliding window inference on large
-      # windows to reduce border effects.
+      # We use some overlap when we need to apply sliding window inference on
+      # large windows to reduce border effects.
       overlap_pixels: 12
       skip_targets: true
 trainer:
   max_epochs: 100
   callbacks:
-    # The RslearnWriter is used during `model predict` to save the predicted outputs to
-    # the rslearn dataset.
+    # The RslearnWriter is used during `model predict` to save the predicted
+    # outputs to the rslearn dataset.
     - class_path: rslearn.train.prediction_writer.RslearnWriter
       init_args:
         output_layer: output
         merger:
           class_path: rslearn.train.prediction_writer.RasterMerger
           init_args:
-            # This removes the boundary that is redundant because of the overlap_pixels.
-            # So we keep the center 116x116 of each 128x128 output, since there are
-            # 12 pixels of overlap between adjacent inference crops.
+            # This removes the boundary that is redundant because of the
+            # overlap_pixels. So we keep the center 116x116 of each 128x128
+            # output, since there are 12 pixels of overlap between adjacent
+            # inference crops.
             overlap_pixels: 12
     # Save best checkpoint based on accuracy metric.
     - class_path: rslearn.train.callbacks.checkpointing.ManagedBestLastCheckpoint
@@ -254,7 +254,7 @@ last saved checkpoint.
 
 ## Apply the Model
 
-Similar to in the [main README](../../README.md), we can now apply the model on a new
+Similar to in the [main README](https://github.com/allenai/rslearn/blob/master/README.md), we can now apply the model on a new
 window.
 
 We create a big window northeast of Bellingham, WA:

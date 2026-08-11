@@ -42,9 +42,9 @@ model:
               # - OLMOEARTH_V1_BASE
               # - OLMOEARTH_V1_LARGE
               model_id: OLMOEARTH_V1_BASE
-              # The patch size should be set between 1 and 8, depending on the size of
-              # the features being predicted, and the available compute (lower patch
-              # sizes are slower).
+              # The patch size should be set between 1 and 8, depending on the
+              # size of the features being predicted, and the available compute
+              # (lower patch sizes are slower).
               patch_size: 4
 ```
 
@@ -83,8 +83,8 @@ Here are some tutorials and examples of applying OlmoEarth.
 
 - [FinetuneOlmoEarth](../examples/FinetuneOlmoEarth.md) shows how to fine-tune
   OlmoEarth on segmentation labels from the USDA Cropland Data Layer.
-- [ProgrammaticWindows](../examples/ProgrammaticWindows.md) shows how to apply
-  OlmoEarth on EuroSAT.
+- [ConvertEuroSAT](../examples/ConvertEuroSAT.md) shows how to apply OlmoEarth on
+  EuroSAT.
 - In olmoearth_projects, see [Fine-tuning OlmoEarth for Classification](https://github.com/allenai/olmoearth_projects/blob/main/docs/tutorials/FinetuneOlmoEarthClassification.md).
   Note that this example uses olmoearth_run in addition to rslearn.
 - You may also find the [model configuration files in olmoearth_projects](https://github.com/allenai/olmoearth_projects/tree/main/olmoearth_run_data)
@@ -182,10 +182,10 @@ data:
   class_path: rslearn.train.data_module.RslearnDataModule
   init_args:
     inputs:
-      # The keys here (corresponding to keys in the input dict) must exactly match with
-      # those expected by the pre-trained model ("sentinel1", "sentinel2_l2a", and
-      # "landsat").
-      # See "class Modality" in https://github.com/allenai/olmoearth_pretrain/blob/main/olmoearth_pretrain/data/constants.py
+      # The keys here (corresponding to keys in the input dict) must exactly
+      # match with those expected by the pre-trained model ("sentinel1",
+      # "sentinel2_l2a", and "landsat"). See "class Modality" in
+      # https://github.com/allenai/olmoearth_pretrain/blob/main/olmoearth_pretrain/data/constants.py
       sentinel1:
         data_type: "raster"
         layers: ["sentinel1", "sentinel1.1", "sentinel1.2", "sentinel1.3", "sentinel1.4", "sentinel1.5", "sentinel1.6", "sentinel1.7", "sentinel1.8", "sentinel1.9", "sentinel1.10", "sentinel1.11"]
@@ -209,9 +209,9 @@ data:
         load_all_layers: true
     default_config:
       transforms:
-        # If you are using Sentinel-1 RTC from Planetary Computer, or other sources
-        # where the pixel values are not already decibels, then make sure to convert to
-        # decibels.
+        # If you are using Sentinel-1 RTC from Planetary Computer, or other
+        # sources where the pixel values are not already decibels, then make
+        # sure to convert to decibels.
         - class_path: rslearn.train.transforms.sentinel1.Sentinel1ToDecibels
           init_args:
             selectors: ["sentinel1"]
@@ -219,9 +219,10 @@ data:
         - class_path: rslearn.models.olmoearth_pretrain.norm.OlmoEarthNormalize
           init_args:
             band_names:
-              # Only include the modalities that you are using here, otherwise it will
-              # raise an error. The input dict keys and band names must match exactly
-              # with those in the normalization config dict in olmoearth_pretrain:
+              # Only include the modalities that you are using here, otherwise
+              # it will raise an error. The input dict keys and band names must
+              # match exactly with those in the normalization config dict in
+              # olmoearth_pretrain:
               # https://github.com/allenai/olmoearth_pretrain/blob/main/olmoearth_pretrain/data/norm_configs/computed.json
               sentinel1: ["vv", "vh"]
               sentinel2_l2a: ["B02", "B03", "B04", "B08", "B05", "B06", "B07", "B8A", "B11", "B12", "B01", "B09"]
@@ -300,9 +301,9 @@ model:
               # Replace with the number of classes.
               out_channels: 2
               conv_layers_per_resolution: 2
-              # This limits the number of channels when the UNet is up-sampling to the
-              # input resolution. Otherwise it will stick with 768 which may be too
-              # large at the highest resolutions.
+              # This limits the number of channels when the UNet is up-sampling
+              # to the input resolution. Otherwise it will stick with 768 which
+              # may be too large at the highest resolutions.
               num_channels: {4: 512, 2: 256, 1: 128}
           - class_path: rslearn.train.tasks.segmentation.SegmentationHead
 ```

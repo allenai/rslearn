@@ -128,7 +128,6 @@ class TaskChannelEmbedding(BaseTaskEmbedding):
         Args:
             inputs: The inputs to the model.
             features: computed encoder features
-            device: The device to compute the embeddings on.
 
         Returns:
             The task-specific embeddings, shape (B, T, C), T = HW

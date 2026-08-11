@@ -6,3 +6,4 @@ rslearn.egg-info
 .DS_Store
 .cursor/
 .claude/
+site/

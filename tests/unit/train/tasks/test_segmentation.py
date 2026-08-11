@@ -468,6 +468,55 @@ class TestSegmentationMetrics:
         assert result["mean_iou/cls_1"] == pytest.approx(0.5, abs=1e-4)
         assert result["mean_iou/cls_2"] == pytest.approx(1.0, abs=1e-4)
 
+    def test_miou_missing_class_scores_zero(self) -> None:
+        """A class absent from predictions and targets contributes zero IoU."""
+        task = SegmentationTask(
+            num_classes=3,
+            enable_accuracy_metric=False,
+            enable_miou_metric=True,
+            report_metric_per_class=True,
+        )
+        metrics = task.get_metrics()
+        preds = torch.tensor([[[[0.9, 0.1]], [[0.1, 0.9]], [[0.0, 0.0]]]])
+        targets = [
+            {
+                "classes": RasterImage(torch.tensor([[[[0, 1]]]], dtype=torch.long)),
+                "valid": RasterImage(torch.ones(1, 1, 1, 2)),
+            }
+        ]
+
+        metrics.update(preds, targets)
+        result = metrics.compute()
+
+        assert result["mean_iou/avg"] == pytest.approx(2 / 3, abs=1e-4)
+        assert result["mean_iou/cls_0"] == pytest.approx(1.0, abs=1e-4)
+        assert result["mean_iou/cls_1"] == pytest.approx(1.0, abs=1e-4)
+        assert result["mean_iou/cls_2"] == pytest.approx(0.0, abs=1e-4)
+
+    def test_miou_can_ignore_missing_class(self) -> None:
+        """ignore_missing_classes excludes absent classes from mean IoU."""
+        task = SegmentationTask(
+            num_classes=3,
+            enable_accuracy_metric=False,
+            enable_miou_metric=True,
+            report_metric_per_class=True,
+            miou_metric_kwargs={"ignore_missing_classes": True},
+        )
+        metrics = task.get_metrics()
+        preds = torch.tensor([[[[0.9, 0.1]], [[0.1, 0.9]], [[0.0, 0.0]]]])
+        targets = [
+            {
+                "classes": RasterImage(torch.tensor([[[[0, 1]]]], dtype=torch.long)),
+                "valid": RasterImage(torch.ones(1, 1, 1, 2)),
+            }
+        ]
+
+        metrics.update(preds, targets)
+        result = metrics.compute()
+
+        assert result["mean_iou/avg"] == pytest.approx(1.0, abs=1e-4)
+        assert "mean_iou/cls_2" not in result
+
     def test_multi_task_dict_metric_keys(
         self,
         segmentation_preds: torch.Tensor,
@@ -505,3 +554,109 @@ class TestSegmentationMetrics:
         assert result["seg/mean_iou/cls_0"] == pytest.approx(0.5, abs=1e-4)
         assert result["seg/mean_iou/cls_1"] == pytest.approx(0.5, abs=1e-4)
         assert result["seg/mean_iou/cls_2"] == pytest.approx(1.0, abs=1e-4)
+
+
+class TestMulticlassMetrics:
+    """Tests for argmax-consistent multiclass segmentation metrics."""
+
+    @pytest.fixture()
+    def confident_preds(self) -> torch.Tensor:
+        """Return probabilities for three correct pixels and one wrong pixel."""
+        return torch.tensor(
+            [
+                [
+                    [[0.8, 0.1], [0.1, 0.1]],
+                    [[0.1, 0.8], [0.1, 0.8]],
+                    [[0.1, 0.1], [0.8, 0.1]],
+                ]
+            ]
+        )
+
+    @pytest.fixture()
+    def unconfident_preds(self) -> torch.Tensor:
+        """Return the same argmax predictions with all probabilities below 0.5."""
+        return torch.tensor(
+            [
+                [
+                    [[0.4, 0.3], [0.3, 0.3]],
+                    [[0.35, 0.4], [0.3, 0.4]],
+                    [[0.25, 0.3], [0.4, 0.3]],
+                ]
+            ]
+        )
+
+    @pytest.fixture()
+    def targets(self) -> list[dict[str, RasterImage]]:
+        """Return targets for the three-class 2x2 examples."""
+        return [
+            {
+                "classes": RasterImage(
+                    torch.tensor([[[[0, 1], [2, 0]]]], dtype=torch.long)
+                ),
+                "valid": RasterImage(torch.ones(1, 1, 2, 2)),
+            }
+        ]
+
+    def test_overall_and_average_match_argmax_reference(
+        self,
+        confident_preds: torch.Tensor,
+        targets: list[dict[str, RasterImage]],
+    ) -> None:
+        """Overall metrics equal accuracy and average F1 equals macro F1."""
+        task = SegmentationTask(
+            num_classes=3,
+            enable_accuracy_metric=True,
+            enable_multiclass_metrics=True,
+        )
+        metrics = task.get_metrics()
+        metrics.update(confident_preds, targets)
+        result = metrics.compute()
+
+        assert result["OverallF1"] == pytest.approx(3 / 4, abs=1e-4)
+        assert result["OverallPrecision"] == pytest.approx(3 / 4, abs=1e-4)
+        assert result["OverallRecall"] == pytest.approx(3 / 4, abs=1e-4)
+        assert result["accuracy"] == pytest.approx(result["AverageRecall"], abs=1e-4)
+        assert result["AverageF1"] == pytest.approx(7 / 9, abs=1e-4)
+
+    def test_survives_low_confidence_where_thresholded_f1_is_zero(
+        self,
+        unconfident_preds: torch.Tensor,
+        targets: list[dict[str, RasterImage]],
+    ) -> None:
+        """Argmax metrics remain useful below the thresholded F1 cutoff."""
+        task = SegmentationTask(
+            num_classes=3,
+            enable_accuracy_metric=True,
+            enable_miou_metric=True,
+            enable_f1_metric=True,
+            enable_multiclass_metrics=True,
+        )
+        metrics = task.get_metrics()
+        metrics.update(unconfident_preds, targets)
+        result = metrics.compute()
+
+        assert result["mean_iou"] == pytest.approx(2 / 3, abs=1e-4)
+        assert result["F1"] == pytest.approx(0.0, abs=1e-4)
+        assert result["precision"] == pytest.approx(0.0, abs=1e-4)
+        assert result["recall"] == pytest.approx(0.0, abs=1e-4)
+        assert result["AverageF1"] == pytest.approx(7 / 9, abs=1e-4)
+
+    def test_classwise_reports_per_class_dict(
+        self,
+        confident_preds: torch.Tensor,
+        targets: list[dict[str, RasterImage]],
+    ) -> None:
+        """Classwise metrics expose one value per class."""
+        task = SegmentationTask(
+            num_classes=3,
+            enable_accuracy_metric=False,
+            enable_multiclass_metrics=True,
+            report_metric_per_class=True,
+        )
+        metrics = task.get_metrics()
+        metrics.update(confident_preds, targets)
+        result = metrics.compute()
+
+        assert result["ClasswiseF1_cls_0"] == pytest.approx(2 / 3, abs=1e-4)
+        assert result["ClasswiseF1_cls_1"] == pytest.approx(2 / 3, abs=1e-4)
+        assert result["ClasswiseF1_cls_2"] == pytest.approx(1.0, abs=1e-4)

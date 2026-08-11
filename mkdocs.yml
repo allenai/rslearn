@@ -1,0 +1,182 @@
+site_name: rslearn
+site_description: A tool for developing remote sensing datasets and models.
+site_url: https://allenai.github.io/rslearn/
+repo_url: https://github.com/allenai/rslearn
+repo_name: allenai/rslearn
+edit_uri: edit/master/docs/
+copyright: Copyright &copy; Allen Institute for AI
+
+docs_dir: docs
+
+theme:
+  name: material
+  features:
+    - navigation.tabs
+    - navigation.tabs.sticky
+    - navigation.prune
+    - navigation.top
+    - navigation.tracking
+    - navigation.indexes
+    - toc.follow
+    - content.code.copy
+    - content.action.edit
+    - search.suggest
+    - search.highlight
+  palette:
+    - media: "(prefers-color-scheme: light)"
+      scheme: default
+      primary: teal
+      accent: teal
+      toggle:
+        icon: material/weather-night
+        name: Switch to dark mode
+    - media: "(prefers-color-scheme: dark)"
+      scheme: slate
+      primary: teal
+      accent: teal
+      toggle:
+        icon: material/weather-sunny
+        name: Switch to light mode
+
+plugins:
+  - search
+  - section-index
+  - gen-files:
+      scripts:
+        - docs/gen_api.py
+  - literate-nav:
+      nav_file: SUMMARY.md
+  - mkdocstrings:
+      handlers:
+        python:
+          paths: [.]
+          options:
+            docstring_style: google
+            show_root_heading: true
+            show_root_full_path: false
+            show_source: true
+            show_signature_annotations: true
+            separate_signature: true
+            signature_crossrefs: true
+            members_order: source
+            filters:
+              - "!^_"
+
+markdown_extensions:
+  - admonition
+  - attr_list
+  - md_in_html
+  - tables
+  - toc:
+      permalink: true
+  - pymdownx.details
+  - pymdownx.highlight:
+      anchor_linenums: true
+  - pymdownx.inlinehilite
+  - pymdownx.snippets
+  - pymdownx.superfences
+
+# The BitemporalSentinel2 data README sits alongside example data assets and is not a page.
+# ProgrammaticWindows.md serves as a redirect for any pre-existing links to
+# https://github.com/allenai/rslearn/blob/master/docs/examples/ProgrammaticWindows.md
+exclude_docs: |
+  examples/BitemporalSentinel2/README.md
+  examples/ProgrammaticWindows.md
+
+nav:
+  - Home:
+      - index.md
+      - Core Concepts: CoreConcepts.md
+      - Development: Development.md
+  - Usage:
+      - Overview: Usage.md
+      - Create Windows:
+        - Create Windows via CLI: DatasetAddWindows.md
+        - Create Windows Programmatically: CreateWindowsProgrammatically.md
+      - Add Custom Raster and Vector Data:
+        - Add Raster Data: AddRasterData.md
+        - Add Vector Data: AddVectorData.md
+  - Examples:
+      - Examples.md
+      - examples/Quickstart.md
+      - examples/WindowsFromGeojson.md
+      - examples/ConvertEuroSAT.md
+      - examples/NaipSentinel2.md
+      - examples/BitemporalSentinel2.md
+      - examples/FinetuneOlmoEarth.md
+      - examples/OlmoEarthEmbeddings.md
+      - examples/FindStadiums.md
+      - examples/GetImageTimeSeries.md
+      - examples/EarthDailySentinel2Biophysical.md
+      - examples/EarthDailyCloudMaskClearCover.md
+    # (example files live under docs/examples/)
+  - Config Reference:
+      - Overview: ConfigReference.md
+      - Dataset Configuration:
+          - Overview: DatasetConfig.md
+          - Dataset Format: DatasetFormat.md
+          - dataset_config/LayerConfig.md
+          - dataset_config/DataSourceConfig.md
+          - dataset_config/TileStoreConfig.md
+          - dataset_config/WindowStorageConfig.md
+          - dataset_config/WindowDataStorageConfig.md
+      - Data Sources:
+          - Overview: DataSources.md
+          - data_sources/aws_glo30_CopernicusGLO30.md
+          - data_sources/aws_google_satellite_embedding_v1.md
+          - data_sources/aws_landsat_LandsatOliTirs.md
+          - data_sources/aws_open_data_Naip.md
+          - data_sources/aws_open_data_Sentinel2.md
+          - data_sources/aws_sentinel1_Sentinel1.md
+          - data_sources/aws_sentinel2_element84_Sentinel2.md
+          - data_sources/chelsa_CHELSADaily.md
+          - data_sources/climate_data_store.md
+          - data_sources/copernicus.md
+          - data_sources/earthdaily.md
+          - data_sources/earthdaily_Biophysical.md
+          - data_sources/earthdaily_Sentinel2C1L2A.md
+          - data_sources/earthdaily_Sentinel2EDACloudMask.md
+          - data_sources/earthdaily_Sentinel2L2A.md
+          - data_sources/earthdatahub_ERA5LandDailyUTCv1.md
+          - data_sources/eurocrops_EuroCrops.md
+          - data_sources/gcp_landsat_Landsat.md
+          - data_sources/gcp_public_data_Sentinel2.md
+          - data_sources/google_earth_engine_GEE.md
+          - data_sources/google_earth_engine_GoogleSatelliteEmbeddings.md
+          - data_sources/hf_srtm_SRTM.md
+          - data_sources/local_files_LocalFiles.md
+          - data_sources/meta_canopy_height_MetaCanopyHeightV2.md
+          - data_sources/nasa_hls_Hls2.md
+          - data_sources/openstreetmap_OpenStreetMap.md
+          - data_sources/planetary_computer_CopDemGlo30.md
+          - data_sources/planetary_computer_Hls2.md
+          - data_sources/planetary_computer_LandsatC2L2.md
+          - data_sources/planetary_computer_Naip.md
+          - data_sources/planetary_computer_PlanetaryComputer.md
+          - data_sources/planetary_computer_Sentinel1.md
+          - data_sources/planetary_computer_Sentinel2.md
+          - data_sources/planetary_computer_Sentinel3SlstrLST.md
+          - data_sources/soildb_SoilDB.md
+          - data_sources/soilgrids_SoilGrids.md
+          - data_sources/usda_cdl_CDL.md
+          - data_sources/usgs_landsat_LandsatOliTirs.md
+          - data_sources/worldcereal_WorldCereal.md
+          - data_sources/worldcover_WorldCover.md
+          - data_sources/worldpop_WorldPop.md
+          - data_sources/xyz_tiles_XyzTiles.md
+      - Compositors:
+          - Overview: Compositors.md
+          - compositors/built_in.md
+          - compositors/hls_fmask_HlsFmaskFirstValid.md
+          - compositors/omni_cloud_mask_OmniCloudMaskFirstValid.md
+          - compositors/sentinel2_scl_Sentinel2SCLBestClear.md
+          - compositors/sentinel2_scl_Sentinel2SCLFirstValid.md
+      - Models & Training:
+          - Model Configuration: ModelConfig.md
+          - Tasks and Models: TasksAndModels.md
+          - Transforms: Transforms.md
+          - Foundation Models:
+              - foundation_models/OlmoEarth.md
+              - foundation_models/SatlasPretrain.md
+              - foundation_models/Tessera.md
+  - API Reference: reference/

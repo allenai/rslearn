@@ -147,10 +147,11 @@ def test_mse_metric(empty_sample_metadata: SampleMetadata) -> None:
     )
     preds = torch.tensor([[0.1, 0.1], [0.1, 0.1]])[None, None, :, :]
 
-    # Accuracy should be (0 + 0.01 + 0.04) / 3 = 0.05 / 3.
+    # In original units, labels are [1, 2, 3] and predictions are [1, 1, 1],
+    # so MSE is (0 + 1 + 4) / 3 = 5 / 3.
     metrics.update(preds, [target_dict])
     results = metrics.compute()
-    assert results["mse"] == pytest.approx(0.05 / 3)
+    assert results["mse"] == pytest.approx(5 / 3)
 
 
 def test_rmse_metric(empty_sample_metadata: SampleMetadata) -> None:
@@ -173,7 +174,7 @@ def test_rmse_metric(empty_sample_metadata: SampleMetadata) -> None:
 
     metrics.update(preds, [target_dict])
     results = metrics.compute()
-    assert results["rmse"] == pytest.approx(np.sqrt(0.05 / 3))
+    assert results["rmse"] == pytest.approx(np.sqrt(5 / 3))
 
 
 def test_mape_metric(empty_sample_metadata: SampleMetadata) -> None:
@@ -196,7 +197,7 @@ def test_mape_metric(empty_sample_metadata: SampleMetadata) -> None:
 
     metrics.update(preds, [target_dict])
     results = metrics.compute()
-    # Labels are [0.1, 0.2, 0.3], preds are [0.1, 0.1, 0.1] over valid pixels.
+    # Labels are [1, 2, 3], preds are [1, 1, 1] over valid pixels.
     # MAPE = mean(abs(pred-label)/abs(label)) = (0 + 0.5 + 2/3) / 3 = 7/18.
     assert results["mape"] == pytest.approx(7 / 18)
 
@@ -221,9 +222,9 @@ def test_r2_metric_list(empty_sample_metadata: SampleMetadata) -> None:
     metrics.update(preds, [target_dict])
     results = metrics.compute()
 
-    assert results["mse"] == pytest.approx(0.05 / 3)
-    # Labels are [0.1, 0.2, 0.3], preds are [0.1, 0.1, 0.1] over valid pixels.
-    # SSE = 0.05, SST = 0.02 => R2 = 1 - 0.05/0.02 = -1.5
+    assert results["mse"] == pytest.approx(5 / 3)
+    # Labels are [1, 2, 3], preds are [1, 1, 1] over valid pixels.
+    # SSE = 5, SST = 2 => R2 = 1 - 5/2 = -1.5
     assert results["r2"] == pytest.approx(-1.5)
 
 

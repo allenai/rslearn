@@ -121,17 +121,21 @@ def resolution_factor_deserializer(v: int | str | dict) -> ResolutionFactor:
     if isinstance(v, ResolutionFactor):
         return v
 
-    # Handle Namespace from class_path syntax (used during config save/validation)
-    if hasattr(v, "init_args"):
-        init_args = v.init_args
+    # Handle Namespace from class_path syntax (used during config save/validation).
+    # init_args may be absent if all arguments take their default values.
+    if hasattr(v, "class_path") or hasattr(v, "init_args"):
+        init_args = getattr(v, "init_args", None)
+        if init_args is None:
+            return ResolutionFactor()
         return ResolutionFactor(
-            numerator=init_args.numerator,
-            denominator=init_args.denominator,
+            numerator=getattr(init_args, "numerator", 1),
+            denominator=getattr(init_args, "denominator", 1),
         )
 
-    # Handle dict from class_path syntax in YAML config
-    if isinstance(v, dict) and "init_args" in v:
-        init_args = v["init_args"]
+    # Handle dict from class_path syntax in YAML config. Same as above, init_args may
+    # be absent if all arguments take their default values.
+    if isinstance(v, dict) and ("class_path" in v or "init_args" in v):
+        init_args = v.get("init_args") or {}
         return ResolutionFactor(
             numerator=init_args.get("numerator", 1),
             denominator=init_args.get("denominator", 1),

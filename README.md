@@ -9,6 +9,8 @@ rslearn helps with:
 3. Fine-tuning remote sensing foundation models on these datasets.
 4. Applying models on new locations and times.
 
+Full documentation is available at **https://allenai.github.io/rslearn/**.
+
 
 Quickstart
 ----------
@@ -17,9 +19,9 @@ If you are new to rslearn, we suggest starting here:
 
 1. First, read [CoreConcepts](docs/CoreConcepts.md), which summarizes key concepts in
    rslearn, including datasets, windows, layers, and data sources.
-2. Second, read [WorkflowOverview](docs/WorkflowOverview.md), which provides an overview
+2. Second, read the [Usage overview](docs/Usage.md), which provides an overview
    of the typical workflow in rslearn, from defining windows to training models.
-3. Finally, walk through the [IntroExample](docs/examples/IntroExample.md), or find
+3. Finally, walk through the [Quickstart](docs/examples/Quickstart.md), or find
    another example in [Examples.md](docs/Examples.md) that can most readily be adapted
    for your project.
 
