@@ -468,6 +468,55 @@ class TestSegmentationMetrics:
         assert result["mean_iou/cls_1"] == pytest.approx(0.5, abs=1e-4)
         assert result["mean_iou/cls_2"] == pytest.approx(1.0, abs=1e-4)
 
+    def test_miou_missing_class_scores_zero(self) -> None:
+        """A class absent from predictions and targets contributes zero IoU."""
+        task = SegmentationTask(
+            num_classes=3,
+            enable_accuracy_metric=False,
+            enable_miou_metric=True,
+            report_metric_per_class=True,
+        )
+        metrics = task.get_metrics()
+        preds = torch.tensor([[[[0.9, 0.1]], [[0.1, 0.9]], [[0.0, 0.0]]]])
+        targets = [
+            {
+                "classes": RasterImage(torch.tensor([[[[0, 1]]]], dtype=torch.long)),
+                "valid": RasterImage(torch.ones(1, 1, 1, 2)),
+            }
+        ]
+
+        metrics.update(preds, targets)
+        result = metrics.compute()
+
+        assert result["mean_iou/avg"] == pytest.approx(2 / 3, abs=1e-4)
+        assert result["mean_iou/cls_0"] == pytest.approx(1.0, abs=1e-4)
+        assert result["mean_iou/cls_1"] == pytest.approx(1.0, abs=1e-4)
+        assert result["mean_iou/cls_2"] == pytest.approx(0.0, abs=1e-4)
+
+    def test_miou_can_ignore_missing_class(self) -> None:
+        """ignore_missing_classes excludes absent classes from mean IoU."""
+        task = SegmentationTask(
+            num_classes=3,
+            enable_accuracy_metric=False,
+            enable_miou_metric=True,
+            report_metric_per_class=True,
+            miou_metric_kwargs={"ignore_missing_classes": True},
+        )
+        metrics = task.get_metrics()
+        preds = torch.tensor([[[[0.9, 0.1]], [[0.1, 0.9]], [[0.0, 0.0]]]])
+        targets = [
+            {
+                "classes": RasterImage(torch.tensor([[[[0, 1]]]], dtype=torch.long)),
+                "valid": RasterImage(torch.ones(1, 1, 1, 2)),
+            }
+        ]
+
+        metrics.update(preds, targets)
+        result = metrics.compute()
+
+        assert result["mean_iou/avg"] == pytest.approx(1.0, abs=1e-4)
+        assert "mean_iou/cls_2" not in result
+
     def test_multi_task_dict_metric_keys(
         self,
         segmentation_preds: torch.Tensor,
