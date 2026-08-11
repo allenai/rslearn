@@ -96,6 +96,7 @@ The emitted bands are:
   raises an error.
 - Slope and aspect use central differences in the interior and one-sided differences
   on the image border, so the outermost pixel ring of each window is less accurate.
-  Pixels with NaN elevation produce NaN slope and aspect.
+- Nodata is assumed to be NaN elevation, which produces NaN slope and aspect for that
+  pixel and its four orthogonally adjacent pixels.
 - See also `rslearn.data_sources.planetary_computer.CopDemGlo30` for the same dataset
   served via Microsoft Planetary Computer's STAC API.

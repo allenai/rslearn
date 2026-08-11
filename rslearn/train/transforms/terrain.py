@@ -26,6 +26,11 @@ class ElevationToSlopeAspect(Transform):
     ``pixel_size_m`` (a ``RasterImage`` does not carry projection metadata). Pixels
     are assumed to be square, which holds for rslearn windows.
 
+    Nodata is assumed to be represented as NaN in the input elevation. NaN pixels
+    produce NaN slope and aspect, and since the gradients read neighboring pixels,
+    each NaN also invalidates the slope and aspect of its four orthogonally adjacent
+    pixels.
+
     Gradients use central differences in the interior and one-sided differences on
     the image border, so slope and aspect on the outermost pixel ring are less
     accurate than the interior.
