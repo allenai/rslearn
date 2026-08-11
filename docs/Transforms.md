@@ -332,3 +332,40 @@ Here is a summary of the configuration options:
             # decibels.
             epsilon: 1e-6
 ```
+
+## ElevationToSlopeAspect
+
+The `ElevationToSlopeAspect` transform derives terrain slope and aspect from a
+single-band elevation image, such as the one provided by
+[aws_glo30.CopernicusGLO30](data_sources/aws_glo30_CopernicusGLO30.md). Slope is in
+degrees [0, 90) and aspect is the compass direction of steepest descent in degrees
+[0, 360), with a configurable value for flat pixels where aspect is undefined.
+
+Since the transform runs after materialization, the image is already in the window's
+projection, so the pixel spacing must be provided in meters.
+
+Here is a summary of the configuration options:
+
+```yaml
+      transforms:
+        - class_path: rslearn.train.transforms.terrain.ElevationToSlopeAspect
+          init_args:
+            # The size of a pixel in meters in the window's projection.
+            pixel_size_m: 10
+            # The selector containing the elevation image, default "elevation".
+            input_selector: "elevation"
+            # The output selector, defaults to the input selector.
+            output_selector: "elevation"
+            # The bands to emit, in order. Choose from elevation, slope, and aspect.
+            bands: ["elevation", "slope", "aspect"]
+            # The aspect value to use for flat pixels.
+            flat_aspect_value: -1.0
+```
+
+Gradients use central differences in the interior and one-sided differences on the
+image border, so slope and aspect on the outermost pixel ring are less accurate than
+the interior.
+
+Nodata is assumed to be represented as NaN in the input elevation. NaN pixels produce
+NaN slope and aspect, and since the gradients read neighboring pixels, each NaN also
+invalidates the slope and aspect of its four orthogonally adjacent pixels.

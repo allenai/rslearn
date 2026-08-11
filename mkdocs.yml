@@ -122,6 +122,7 @@ nav:
           - dataset_config/WindowDataStorageConfig.md
       - Data Sources:
           - Overview: DataSources.md
+          - data_sources/aws_glo30_CopernicusGLO30.md
           - data_sources/aws_google_satellite_embedding_v1.md
           - data_sources/aws_landsat_LandsatOliTirs.md
           - data_sources/aws_open_data_Naip.md
