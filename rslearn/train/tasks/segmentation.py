@@ -1,7 +1,7 @@
 """Segmentation task."""
 
 from collections.abc import Mapping
-from typing import Any
+from typing import Any, Literal
 
 import numpy as np
 import numpy.typing as npt
@@ -36,10 +36,12 @@ class SegmentationTask(BasicTask):
         enable_accuracy_metric: bool = True,
         enable_miou_metric: bool = False,
         enable_f1_metric: bool = False,
+        enable_multiclass_metrics: bool = False,
         report_metric_per_class: bool = False,
         f1_metric_thresholds: list[list[float]] = [[0.5]],
         metric_kwargs: dict[str, Any] = {},
         miou_metric_kwargs: dict[str, Any] = {},
+        multiclass_metric_kwargs: dict[str, Any] = {},
         prob_scales: list[float] | None = None,
         other_metrics: dict[str, Metric] = {},
         output_probs: bool = False,
@@ -61,7 +63,20 @@ class SegmentationTask(BasicTask):
                 If provided, class labels will be remapped according to this dictionary.
             enable_accuracy_metric: whether to enable the accuracy metric (default
                 true).
-            enable_f1_metric: whether to enable the F1 metric (default false).
+            enable_f1_metric: whether to enable the F1 metric (default false). This
+                metric treats each class as an independent one-vs-rest detection
+                problem: predicted probabilities are thresholded per class
+                (f1_metric_thresholds) rather than compared via argmax, so it is not
+                directly comparable to the argmax-based accuracy/mean_iou metrics.
+                It is best suited to threshold tuning; for a metric consistent with
+                argmax-based accuracy/mean_iou, use enable_multiclass_metrics instead.
+            enable_multiclass_metrics: whether to enable standard TorchMetrics
+                multiclass F1/precision/recall metrics (default false), computed from
+                argmax predictions like accuracy and mean_iou. Reports "Overall*"
+                (micro-averaged, equivalent to accuracy for single-label multiclass
+                segmentation), "Average*" (macro-averaged across classes), and, if
+                report_metric_per_class is set, "Classwise*" (per-class, average=None)
+                variants of F1, precision, and recall.
             report_metric_per_class: whether to report chosen metrics for each class, in
                 addition to the average score across classes.
             enable_miou_metric: whether to enable the mean IoU metric (default false).
@@ -74,6 +89,9 @@ class SegmentationTask(BasicTask):
                 torchmetrics.classification.MulticlassAccuracy.
             miou_metric_kwargs: additional arguments to pass to MeanIoUMetric, if
                 enable_miou_metric is passed.
+            multiclass_metric_kwargs: additional arguments to pass to the underlying
+                torchmetrics.classification.Multiclass{F1Score,Precision,Recall}
+                metrics, if enable_multiclass_metrics is passed.
             prob_scales: during inference, scale the output probabilities by this much
                 before computing the argmax. There is one scale per class. Note that
                 this is only applied during prediction, not when computing val or test
@@ -104,11 +122,13 @@ class SegmentationTask(BasicTask):
 
         self.enable_accuracy_metric = enable_accuracy_metric
         self.enable_f1_metric = enable_f1_metric
+        self.enable_multiclass_metrics = enable_multiclass_metrics
         self.enable_miou_metric = enable_miou_metric
         self.report_metric_per_class = report_metric_per_class
         self.f1_metric_thresholds = f1_metric_thresholds
         self.metric_kwargs = metric_kwargs
         self.miou_metric_kwargs = miou_metric_kwargs
+        self.multiclass_metric_kwargs = multiclass_metric_kwargs
         self.prob_scales = prob_scales
         self.other_metrics = other_metrics
         self.output_probs = output_probs
@@ -275,6 +295,39 @@ class SegmentationTask(BasicTask):
                         score_thresholds=thresholds,
                         metric_mode="recall",
                         report_per_class=self.report_metric_per_class,
+                    ),
+                )
+
+        if self.enable_multiclass_metrics:
+            multiclass_metric_kwargs: dict[str, Any] = dict(
+                num_classes=self.num_classes
+            )
+            multiclass_metric_kwargs.update(self.multiclass_metric_kwargs)
+
+            # "Overall" (micro) and "Average" (macro) are always reported; "Classwise"
+            # (average=None, one score per class) follows report_metric_per_class like
+            # the other metrics above.
+            average_modes: list[tuple[str, Literal["micro", "macro", "none"]]] = [
+                ("Overall", "micro"),
+                ("Average", "macro"),
+            ]
+            if self.report_metric_per_class:
+                average_modes.append(("Classwise", "none"))
+
+            for name_prefix, average in average_modes:
+                metrics[f"{name_prefix}F1"] = SegmentationMetric(
+                    torchmetrics.classification.MulticlassF1Score(
+                        average=average, **multiclass_metric_kwargs
+                    ),
+                )
+                metrics[f"{name_prefix}Precision"] = SegmentationMetric(
+                    torchmetrics.classification.MulticlassPrecision(
+                        average=average, **multiclass_metric_kwargs
+                    ),
+                )
+                metrics[f"{name_prefix}Recall"] = SegmentationMetric(
+                    torchmetrics.classification.MulticlassRecall(
+                        average=average, **multiclass_metric_kwargs
                     ),
                 )
 
