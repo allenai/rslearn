@@ -76,9 +76,12 @@ markdown_extensions:
   - pymdownx.snippets
   - pymdownx.superfences
 
-# These helper README files sit alongside example data assets and are not pages.
+# The BitemporalSentinel2 data README sits alongside example data assets and is not a page.
+# ProgrammaticWindows.md serves as a redirect for any pre-existing links to
+# https://github.com/allenai/rslearn/blob/master/docs/examples/ProgrammaticWindows.md
 exclude_docs: |
   examples/BitemporalSentinel2/README.md
+  examples/ProgrammaticWindows.md
 
 nav:
   - Home:
@@ -86,13 +89,18 @@ nav:
       - Core Concepts: CoreConcepts.md
       - Development: Development.md
   - Usage:
-      - Usage.md
-      - Adding Windows: DatasetAddWindows.md
+      - Overview: Usage.md
+      - Create Windows:
+        - Create Windows via CLI: DatasetAddWindows.md
+        - Create Windows Programmatically: CreateWindowsProgrammatically.md
+      - Add Custom Raster and Vector Data:
+        - Add Raster Data: AddRasterData.md
+        - Add Vector Data: AddVectorData.md
   - Examples:
       - Examples.md
       - examples/Quickstart.md
       - examples/WindowsFromGeojson.md
-      - examples/ProgrammaticWindows.md
+      - examples/ConvertEuroSAT.md
       - examples/NaipSentinel2.md
       - examples/BitemporalSentinel2.md
       - examples/FinetuneOlmoEarth.md
@@ -137,6 +145,7 @@ nav:
           - data_sources/google_earth_engine_GoogleSatelliteEmbeddings.md
           - data_sources/hf_srtm_SRTM.md
           - data_sources/local_files_LocalFiles.md
+          - data_sources/meta_canopy_height_MetaCanopyHeightV2.md
           - data_sources/nasa_hls_Hls2.md
           - data_sources/openstreetmap_OpenStreetMap.md
           - data_sources/planetary_computer_CopDemGlo30.md

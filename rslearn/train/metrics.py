@@ -1,7 +1,7 @@
 """Metric output classes for non-scalar metrics."""
 
-from abc import ABC, abstractmethod
 from dataclasses import dataclass
+from typing import Any
 
 import torch
 import wandb
@@ -13,21 +13,30 @@ logger = get_logger(__name__)
 
 
 @dataclass
-class NonScalarMetricOutput(ABC):
+class NonScalarMetricOutput:
     """Base class for non-scalar metric outputs that need special logging.
 
-    Subclasses should implement the log_to_wandb method to define how the metric
-    should be logged (only supports logging to Weights & Biases).
+    Subclasses should implement the platform-specific methods for the loggers they
+    support. Unsupported loggers are skipped with a warning.
     """
 
-    @abstractmethod
     def log_to_wandb(self, name: str) -> None:
         """Log this metric to wandb.
 
         Args:
             name: the metric name
         """
-        pass
+        logger.warning("W&B logging is not implemented for metric %s", name)
+
+    def log_to_mlflow(self, name: str, client: Any, run_id: str) -> None:
+        """Log this metric to MLflow.
+
+        Args:
+            name: the metric name.
+            client: the MLflow client associated with the Lightning logger.
+            run_id: the MLflow run ID.
+        """
+        logger.warning("MLflow logging is not implemented for metric %s", name)
 
 
 @dataclass
@@ -98,6 +107,37 @@ class ConfusionMatrixOutput(NonScalarMetricOutput):
                     title=name,
                 ),
             },
+        )
+
+    def log_to_mlflow(self, name: str, client: Any, run_id: str) -> None:
+        """Log the confusion matrix as an MLflow table artifact.
+
+        Args:
+            name: the metric name (e.g., ``val_confusion_matrix``).
+            client: the MLflow client associated with the Lightning logger.
+            run_id: the MLflow run ID.
+        """
+        cm = self.confusion_matrix.detach().cpu()
+        if cm.dim() > 2:
+            cm = cm.sum(dim=0)
+
+        num_classes = cm.shape[0]
+        class_names = self.class_names or [str(i) for i in range(num_classes)]
+        data: dict[str, list[Any]] = {
+            "true_class": [],
+            "predicted_class": [],
+            "count": [],
+        }
+        for true_label in range(cm.shape[0]):
+            for pred_label in range(cm.shape[1]):
+                data["true_class"].append(class_names[true_label])
+                data["predicted_class"].append(class_names[pred_label])
+                data["count"].append(int(cm[true_label, pred_label].item()))
+
+        client.log_table(
+            run_id=run_id,
+            data=data,
+            artifact_file=f"{name}.json",
         )
 
 

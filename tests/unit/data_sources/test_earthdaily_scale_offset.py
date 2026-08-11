@@ -168,7 +168,7 @@ def test_read_raster_preserves_nodata_from_metadata(tmp_path: Path) -> None:
     np.testing.assert_allclose(arr[0], expected)
 
 
-def test_earthdaily_item_serialize_roundtrip_preserves_product_id() -> None:
+def test_earthdaily_item_serialize_roundtrip_preserves_sentinel2_metadata() -> None:
     geom = STGeometry(
         Projection(CRS.from_epsg(3857), 1, -1),
         shapely.box(0, 0, 2, 2),
@@ -179,11 +179,17 @@ def test_earthdaily_item_serialize_roundtrip_preserves_product_id() -> None:
         geometry=geom,
         asset_urls={"red": "/tmp/red.tif"},
         product_id="S2A_MSIL2A_20240101T000000_N0511_R080_T15CWM_20240101T150509",
+        boa_offset_applied=True,
     )
 
     restored = EarthDailyItem.deserialize(item.serialize())
 
     assert restored.product_id == item.product_id
+    assert restored.boa_offset_applied is True
+
+    legacy_serialized = item.serialize()
+    del legacy_serialized["boa_offset_applied"]
+    assert EarthDailyItem.deserialize(legacy_serialized).boa_offset_applied is None
 
 
 def test_init_requires_float32_band_dtype_when_scale_offset_enabled() -> None:

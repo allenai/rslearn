@@ -135,8 +135,9 @@ class Planet(DataSource):
                     sort_by = self.sort_by
 
                 planet_items.sort(
-                    key=lambda planet_item: multiplier
-                    * planet_item["properties"][sort_by]
+                    key=lambda planet_item: (
+                        multiplier * planet_item["properties"][sort_by]
+                    )
                 )
 
             items = []

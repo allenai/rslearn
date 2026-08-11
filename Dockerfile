@@ -4,6 +4,9 @@ COPY --from=ghcr.io/astral-sh/uv:latest /uv /usr/local/bin/uv
 
 WORKDIR /rslearn
 
+# g++ is needed at runtime by torch.compile (inductor) to build CPU kernels.
+RUN apt-get update && apt-get install -y --no-install-recommends g++ && rm -rf /var/lib/apt/lists/*
+
 COPY pyproject.toml /rslearn/pyproject.toml
 COPY uv.lock /rslearn/uv.lock
 RUN uv sync --extra extra --extra dev --extra terratorch --no-install-project

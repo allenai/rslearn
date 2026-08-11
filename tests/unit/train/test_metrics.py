@@ -3,7 +3,32 @@
 import pytest
 import torch
 
-from rslearn.train.metrics import ConfusionMatrixMetric, ConfusionMatrixOutput
+from rslearn.train.metrics import (
+    ConfusionMatrixMetric,
+    ConfusionMatrixOutput,
+    NonScalarMetricOutput,
+)
+
+
+def test_unsupported_loggers_warn(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Test that unsupported W&B and MLflow logging behave symmetrically."""
+    import rslearn.train.metrics as metrics_module
+
+    warnings: list[tuple[object, ...]] = []
+    monkeypatch.setattr(
+        metrics_module.logger,
+        "warning",
+        lambda *args: warnings.append(args),
+    )
+
+    output = NonScalarMetricOutput()
+    output.log_to_wandb("metric")
+    output.log_to_mlflow("metric", client=object(), run_id="run-id")
+
+    assert warnings == [
+        ("W&B logging is not implemented for metric %s", "metric"),
+        ("MLflow logging is not implemented for metric %s", "metric"),
+    ]
 
 
 class TestConfusionMatrixMetric:
@@ -119,3 +144,28 @@ class TestConfusionMatrixOutput:
         assert cm_call_args["title"] == "val_confusion_matrix"
         assert len(cm_call_args["preds"]) == 6
         assert len(cm_call_args["y_true"]) == 6
+
+    def test_log_to_mlflow(self) -> None:
+        """Test that MLflow receives a compact confusion-matrix table."""
+
+        class MockClient:
+            def __init__(self) -> None:
+                self.kwargs: dict = {}
+
+            def log_table(self, **kwargs: object) -> None:
+                self.kwargs = kwargs
+
+        client = MockClient()
+        output = ConfusionMatrixOutput(
+            confusion_matrix=torch.tensor([[2, 1], [0, 3]], dtype=torch.long),
+            class_names=["a", "b"],
+        )
+        output.log_to_mlflow("val_confusion_matrix", client, "run-123")
+
+        assert client.kwargs["run_id"] == "run-123"
+        assert client.kwargs["artifact_file"] == "val_confusion_matrix.json"
+        assert client.kwargs["data"] == {
+            "true_class": ["a", "a", "b", "b"],
+            "predicted_class": ["a", "b", "a", "b"],
+            "count": [2, 1, 0, 3],
+        }

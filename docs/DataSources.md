@@ -105,6 +105,12 @@ These data sources are still experimental and may have incomplete functionality.
 | [worldcereal.WorldCereal](data_sources/worldcereal_WorldCereal.md) | ESA WorldCereal 2021 crop map |
 | [usda_cdl.CDL](data_sources/usda_cdl_CDL.md) | USDA Cropland Data Layer (US only) |
 
+#### Vegetation / Forestry
+
+| Data Source | Description |
+|---|---|
+| [meta_canopy_height.MetaCanopyHeightV2](data_sources/meta_canopy_height_MetaCanopyHeightV2.md) | Meta/WRI Canopy Height Maps v2 (1m), from public AWS S3 |
+
 #### Soil
 
 | Data Source | Description |
