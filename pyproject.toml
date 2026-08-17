@@ -50,6 +50,7 @@ extra = [
     "huggingface_hub>=0.34.4",
     "h5netcdf>=1.6",
     "h5py>=3.12",
+    "matplotlib>=3.8",
     "netCDF4>=1.7.2",
     "omnicloudmask>=1.7.1",
     "osmium>=4.0.2",
