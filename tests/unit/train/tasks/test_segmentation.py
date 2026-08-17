@@ -441,6 +441,73 @@ class TestSegmentationMetrics:
         assert result["mean_iou"] == pytest.approx(2 / 3, abs=1e-4)
         assert result["F1"] == pytest.approx(7 / 9, abs=1e-4)
 
+    def test_class_names_length_must_match_num_classes(self) -> None:
+        """Class names must define exactly one name per class ID."""
+        with pytest.raises(ValueError, match="expected 3, got 2"):
+            SegmentationTask(num_classes=3, class_names=["wheat", "other"])
+
+    def test_named_thresholded_f1_and_miou_metrics(
+        self,
+        segmentation_preds: torch.Tensor,
+        segmentation_targets: list[dict[str, RasterImage]],
+    ) -> None:
+        """Custom per-class metrics use the configured class names."""
+        class_names = ["wheat", "maize", "other"]
+
+        f1_task = SegmentationTask(
+            num_classes=3,
+            class_names=class_names,
+            enable_accuracy_metric=False,
+            enable_f1_metric=True,
+            report_metric_per_class=True,
+        )
+        f1_metrics = f1_task.get_metrics().clone(prefix="test_")
+        f1_metrics.update(segmentation_preds, segmentation_targets)
+        f1_result = f1_metrics.compute()
+
+        assert f1_result["test_F1_wheat"] == pytest.approx(2 / 3, abs=1e-4)
+        assert f1_result["test_F1_maize"] == pytest.approx(2 / 3, abs=1e-4)
+        assert f1_result["test_F1_other"] == pytest.approx(1.0, abs=1e-4)
+        assert f1_result["test_precision_wheat"] == pytest.approx(1.0, abs=1e-4)
+        assert f1_result["test_recall_wheat"] == pytest.approx(0.5, abs=1e-4)
+        assert not any("/" in key for key in f1_result)
+
+        miou_task = SegmentationTask(
+            num_classes=3,
+            class_names=class_names,
+            enable_accuracy_metric=False,
+            enable_miou_metric=True,
+            report_metric_per_class=True,
+        )
+        miou_metrics = miou_task.get_metrics().clone(prefix="test_")
+        miou_metrics.update(segmentation_preds, segmentation_targets)
+        miou_result = miou_metrics.compute()
+
+        assert miou_result["test_mean_iou_wheat"] == pytest.approx(0.5, abs=1e-4)
+        assert miou_result["test_mean_iou_maize"] == pytest.approx(0.5, abs=1e-4)
+        assert miou_result["test_mean_iou_other"] == pytest.approx(1.0, abs=1e-4)
+        assert not any("/" in key for key in miou_result)
+
+    def test_thresholded_f1_retains_default_class_labels(
+        self,
+        segmentation_preds: torch.Tensor,
+        segmentation_targets: list[dict[str, RasterImage]],
+    ) -> None:
+        """Omitting class names preserves the existing numeric metric keys."""
+        task = SegmentationTask(
+            num_classes=3,
+            enable_accuracy_metric=False,
+            enable_f1_metric=True,
+            report_metric_per_class=True,
+        )
+        metrics = task.get_metrics()
+        metrics.update(segmentation_preds, segmentation_targets)
+        result = metrics.compute()
+
+        assert result["F1_f1/cls_0"] == pytest.approx(2 / 3, abs=1e-4)
+        assert result["F1_f1/cls_1"] == pytest.approx(2 / 3, abs=1e-4)
+        assert result["F1_f1/cls_2"] == pytest.approx(1.0, abs=1e-4)
+
     def test_dict_metric_per_class_miou(
         self,
         segmentation_preds: torch.Tensor,
@@ -660,3 +727,25 @@ class TestMulticlassMetrics:
         assert result["ClasswiseF1_cls_0"] == pytest.approx(2 / 3, abs=1e-4)
         assert result["ClasswiseF1_cls_1"] == pytest.approx(2 / 3, abs=1e-4)
         assert result["ClasswiseF1_cls_2"] == pytest.approx(1.0, abs=1e-4)
+
+    def test_classwise_uses_class_names(
+        self,
+        confident_preds: torch.Tensor,
+        targets: list[dict[str, RasterImage]],
+    ) -> None:
+        """Classwise metrics replace numeric labels with configured class names."""
+        task = SegmentationTask(
+            num_classes=3,
+            class_names=["wheat", "maize", "other"],
+            enable_accuracy_metric=False,
+            enable_multiclass_metrics=True,
+            report_metric_per_class=True,
+        )
+        metrics = task.get_metrics().clone(prefix="test_")
+        metrics.update(confident_preds, targets)
+        result = metrics.compute()
+
+        assert result["test_ClasswiseF1_wheat"] == pytest.approx(2 / 3, abs=1e-4)
+        assert result["test_ClasswiseF1_maize"] == pytest.approx(2 / 3, abs=1e-4)
+        assert result["test_ClasswiseF1_other"] == pytest.approx(1.0, abs=1e-4)
+        assert not any("cls_" in key for key in result)
