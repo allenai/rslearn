@@ -6,6 +6,7 @@ from typing import Any
 import torch
 import wandb
 from torchmetrics import Metric
+from torchmetrics.classification import MulticlassConfusionMatrix
 
 from rslearn.log_utils import get_logger
 
@@ -110,7 +111,7 @@ class ConfusionMatrixOutput(NonScalarMetricOutput):
         )
 
     def log_to_mlflow(self, name: str, client: Any, run_id: str) -> None:
-        """Log the confusion matrix as an MLflow table artifact.
+        """Log the confusion matrix as MLflow table and figure artifacts.
 
         Args:
             name: the metric name (e.g., ``val_confusion_matrix``).
@@ -139,6 +140,23 @@ class ConfusionMatrixOutput(NonScalarMetricOutput):
             data=data,
             artifact_file=f"{name}.json",
         )
+
+        # TorchMetrics provides the confusion-matrix visualization; MLflow stores the
+        # resulting Matplotlib figure as an artifact.
+        plotter = MulticlassConfusionMatrix(num_classes=num_classes)
+        figure, axes = plotter.plot(val=cm, labels=class_names)
+        # Import lazily because Matplotlib is only required by the optional MLflow path.
+        from matplotlib import pyplot as plt
+
+        try:
+            axes.set_title(name)
+            client.log_figure(
+                run_id=run_id,
+                figure=figure,
+                artifact_file=f"{name}.png",
+            )
+        finally:
+            plt.close(figure)
 
 
 class ConfusionMatrixMetric(Metric):

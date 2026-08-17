@@ -146,14 +146,18 @@ class TestConfusionMatrixOutput:
         assert len(cm_call_args["y_true"]) == 6
 
     def test_log_to_mlflow(self) -> None:
-        """Test that MLflow receives a compact confusion-matrix table."""
+        """Test that MLflow receives confusion-matrix table and figure artifacts."""
 
         class MockClient:
             def __init__(self) -> None:
-                self.kwargs: dict = {}
+                self.table_kwargs: dict = {}
+                self.figure_kwargs: dict = {}
 
             def log_table(self, **kwargs: object) -> None:
-                self.kwargs = kwargs
+                self.table_kwargs = kwargs
+
+            def log_figure(self, **kwargs: object) -> None:
+                self.figure_kwargs = kwargs
 
         client = MockClient()
         output = ConfusionMatrixOutput(
@@ -162,10 +166,18 @@ class TestConfusionMatrixOutput:
         )
         output.log_to_mlflow("val_confusion_matrix", client, "run-123")
 
-        assert client.kwargs["run_id"] == "run-123"
-        assert client.kwargs["artifact_file"] == "val_confusion_matrix.json"
-        assert client.kwargs["data"] == {
+        assert client.table_kwargs["run_id"] == "run-123"
+        assert client.table_kwargs["artifact_file"] == "val_confusion_matrix.json"
+        assert client.table_kwargs["data"] == {
             "true_class": ["a", "a", "b", "b"],
             "predicted_class": ["a", "b", "a", "b"],
             "count": [2, 1, 0, 3],
         }
+        assert client.figure_kwargs["run_id"] == "run-123"
+        assert client.figure_kwargs["artifact_file"] == "val_confusion_matrix.png"
+        figure = client.figure_kwargs["figure"]
+        assert figure.axes[0].get_title() == "val_confusion_matrix"
+        assert [label.get_text() for label in figure.axes[0].get_xticklabels()] == [
+            "a",
+            "b",
+        ]
