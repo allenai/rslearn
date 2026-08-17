@@ -465,11 +465,11 @@ class TestSegmentationMetrics:
         f1_metrics.update(segmentation_preds, segmentation_targets)
         f1_result = f1_metrics.compute()
 
-        assert f1_result["test_F1_wheat"] == pytest.approx(2 / 3, abs=1e-4)
-        assert f1_result["test_F1_maize"] == pytest.approx(2 / 3, abs=1e-4)
-        assert f1_result["test_F1_other"] == pytest.approx(1.0, abs=1e-4)
-        assert f1_result["test_precision_wheat"] == pytest.approx(1.0, abs=1e-4)
-        assert f1_result["test_recall_wheat"] == pytest.approx(0.5, abs=1e-4)
+        assert f1_result["test_wheat_f1"] == pytest.approx(2 / 3, abs=1e-4)
+        assert f1_result["test_maize_f1"] == pytest.approx(2 / 3, abs=1e-4)
+        assert f1_result["test_other_f1"] == pytest.approx(1.0, abs=1e-4)
+        assert f1_result["test_wheat_precision"] == pytest.approx(1.0, abs=1e-4)
+        assert f1_result["test_wheat_recall"] == pytest.approx(0.5, abs=1e-4)
         assert not any("/" in key for key in f1_result)
 
         miou_task = SegmentationTask(
@@ -483,9 +483,9 @@ class TestSegmentationMetrics:
         miou_metrics.update(segmentation_preds, segmentation_targets)
         miou_result = miou_metrics.compute()
 
-        assert miou_result["test_mean_iou_wheat"] == pytest.approx(0.5, abs=1e-4)
-        assert miou_result["test_mean_iou_maize"] == pytest.approx(0.5, abs=1e-4)
-        assert miou_result["test_mean_iou_other"] == pytest.approx(1.0, abs=1e-4)
+        assert miou_result["test_wheat_mean_iou"] == pytest.approx(0.5, abs=1e-4)
+        assert miou_result["test_maize_mean_iou"] == pytest.approx(0.5, abs=1e-4)
+        assert miou_result["test_other_mean_iou"] == pytest.approx(1.0, abs=1e-4)
         assert not any("/" in key for key in miou_result)
 
     def test_thresholded_f1_retains_default_class_labels(
@@ -745,7 +745,7 @@ class TestMulticlassMetrics:
         metrics.update(confident_preds, targets)
         result = metrics.compute()
 
-        assert result["test_ClasswiseF1_wheat"] == pytest.approx(2 / 3, abs=1e-4)
-        assert result["test_ClasswiseF1_maize"] == pytest.approx(2 / 3, abs=1e-4)
-        assert result["test_ClasswiseF1_other"] == pytest.approx(1.0, abs=1e-4)
+        assert result["test_wheat_classwise_f1"] == pytest.approx(2 / 3, abs=1e-4)
+        assert result["test_maize_classwise_f1"] == pytest.approx(2 / 3, abs=1e-4)
+        assert result["test_other_classwise_f1"] == pytest.approx(1.0, abs=1e-4)
         assert not any("cls_" in key for key in result)
