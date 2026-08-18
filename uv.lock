@@ -5654,7 +5654,7 @@ requires-dist = [
     { name = "aiobotocore", marker = "extra == 'extra'", specifier = ">=2.19.0" },
     { name = "boto3", specifier = ">=1.39" },
     { name = "cdsapi", marker = "extra == 'extra'", specifier = ">=0.7.6" },
-    { name = "earthdaily", extras = ["platform"], marker = "extra == 'extra'", specifier = ">=1.9.0" },
+    { name = "earthdaily", extras = ["platform"], marker = "extra == 'extra'", specifier = ">=2.0.0" },
     { name = "earthengine-api", marker = "extra == 'extra'", specifier = ">=1.6.3" },
     { name = "einops", marker = "extra == 'extra'", specifier = ">=0.8" },
     { name = "fiona", specifier = ">=1.10" },
