@@ -34,7 +34,7 @@ dependencies = [
 # These are requirements that are specific to a subset of data sources or models.
 extra = [
     "cdsapi>=0.7.6",
-    "earthdaily[platform]>=1.9.0",
+    "earthdaily[platform]>=2.0.0",
     "earthengine-api>=1.6.3",
     "einops>=0.8",
     "olmoearth-pretrain-minimal>=0.0.6",
