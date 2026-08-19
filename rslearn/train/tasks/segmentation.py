@@ -23,6 +23,13 @@ from rslearn.utils.colors import DEFAULT_COLORS
 from .task import BasicTask
 
 
+def _get_class_label(class_names: list[str] | None, class_idx: int) -> str:
+    """Get the metric label for a class index."""
+    if class_names is not None:
+        return class_names[class_idx]
+    return f"cls_{class_idx}"
+
+
 class SegmentationTask(BasicTask):
     """A segmentation (per-pixel classification) task."""
 
@@ -103,12 +110,19 @@ class SegmentationTask(BasicTask):
                 for this specific class index (single-channel output).
             enable_confusion_matrix: whether to compute confusion matrix (default false).
                 If true, it requires wandb to be initialized for logging.
-            class_names: optional list of class names for labeling confusion matrix axes.
-                If not provided, classes will be labeled as "class_0", "class_1", etc.
+            class_names: optional ordered list of class names for labeling per-class
+                metrics and confusion matrix axes. The name at index i corresponds to
+                class ID i. If not provided, per-class metrics retain their default
+                "cls_0", "cls_1", etc. labels.
             kwargs: additional arguments to pass to BasicTask
         """
         super().__init__(**kwargs)
         self.num_classes = num_classes
+        if class_names is not None and len(class_names) != num_classes:
+            raise ValueError(
+                "class_names must contain exactly num_classes entries "
+                f"(expected {num_classes}, got {len(class_names)})"
+            )
         self.class_id_mapping = class_id_mapping
         self.colors = colors
         self.nodata_value: int | None
@@ -279,6 +293,7 @@ class SegmentationTask(BasicTask):
                         num_classes=self.num_classes,
                         score_thresholds=thresholds,
                         report_per_class=self.report_metric_per_class,
+                        class_names=self.class_names,
                     ),
                 )
                 metrics["precision" + suffix] = SegmentationMetric(
@@ -287,6 +302,7 @@ class SegmentationTask(BasicTask):
                         score_thresholds=thresholds,
                         metric_mode="precision",
                         report_per_class=self.report_metric_per_class,
+                        class_names=self.class_names,
                     ),
                 )
                 metrics["recall" + suffix] = SegmentationMetric(
@@ -295,6 +311,7 @@ class SegmentationTask(BasicTask):
                         score_thresholds=thresholds,
                         metric_mode="recall",
                         report_per_class=self.report_metric_per_class,
+                        class_names=self.class_names,
                     ),
                 )
 
@@ -319,15 +336,25 @@ class SegmentationTask(BasicTask):
                     torchmetrics.classification.MulticlassF1Score(
                         average=average, **multiclass_metric_kwargs
                     ),
+                    class_names=self.class_names,
+                    class_metric_name=("classwise_f1" if average == "none" else None),
                 )
                 metrics[f"{name_prefix}Precision"] = SegmentationMetric(
                     torchmetrics.classification.MulticlassPrecision(
                         average=average, **multiclass_metric_kwargs
                     ),
+                    class_names=self.class_names,
+                    class_metric_name=(
+                        "classwise_precision" if average == "none" else None
+                    ),
                 )
                 metrics[f"{name_prefix}Recall"] = SegmentationMetric(
                     torchmetrics.classification.MulticlassRecall(
                         average=average, **multiclass_metric_kwargs
+                    ),
+                    class_names=self.class_names,
+                    class_metric_name=(
+                        "classwise_recall" if average == "none" else None
                     ),
                 )
 
@@ -335,6 +362,7 @@ class SegmentationTask(BasicTask):
             miou_metric_kwargs: dict[str, Any] = dict(
                 num_classes=self.num_classes,
                 report_per_class=self.report_metric_per_class,
+                class_names=self.class_names,
             )
             if self.nodata_value is not None:
                 miou_metric_kwargs["nodata_value"] = self.nodata_value
@@ -342,6 +370,7 @@ class SegmentationTask(BasicTask):
             metrics["mean_iou"] = SegmentationMetric(
                 MeanIoUMetric(**miou_metric_kwargs),
                 pass_probabilities=False,
+                class_names=self.class_names,
             )
 
         if self.other_metrics:
@@ -451,6 +480,8 @@ class SegmentationMetric(Metric):
         pass_probabilities: bool = True,
         class_idx: int | None = None,
         output_key: str | None = None,
+        class_names: list[str] | None = None,
+        class_metric_name: str | None = None,
     ):
         """Initialize a new SegmentationMetric.
 
@@ -466,12 +497,17 @@ class SegmentationMetric(Metric):
                 converted to a dict), return only this key's value. For standard
                 torchmetrics with average=None, tensors are converted to dicts with
                 keys "cls_0", "cls_1", etc. If None, the full dict is returned.
+            class_names: optional ordered class names to use instead of "cls_N" when
+                converting a per-class tensor to a dictionary.
+            class_metric_name: metric suffix to append to configured class names.
         """
         super().__init__()
         self.metric = metric
         self.pass_probabilities = pass_probabilities
         self.class_idx = class_idx
         self.output_key = output_key
+        self.class_names = class_names
+        self.class_metric_name = class_metric_name
 
     def update(
         self, preds: list[Any] | torch.Tensor, targets: list[dict[str, Any]]
@@ -513,7 +549,13 @@ class SegmentationMetric(Metric):
         # Convert multi-element tensors to dict for uniform handling.
         # This supports standard torchmetrics with average=None which return per-class tensors.
         if isinstance(result, torch.Tensor) and result.ndim >= 1:
-            result = {f"cls_{i}": result[i] for i in range(len(result))}
+            per_class_result = result
+            result = {}
+            for i in range(len(per_class_result)):
+                class_label = _get_class_label(self.class_names, i)
+                if self.class_names is not None and self.class_metric_name is not None:
+                    class_label = f"{class_label}_{self.class_metric_name}"
+                result[class_label] = per_class_result[i]
 
         if self.output_key is not None:
             if not isinstance(result, dict):
@@ -525,7 +567,10 @@ class SegmentationMetric(Metric):
         if self.class_idx is not None:
             # For backward compatibility: class_idx can index into the converted dict
             if isinstance(result, dict):
-                return result[f"cls_{self.class_idx}"]
+                class_label = _get_class_label(self.class_names, self.class_idx)
+                if self.class_names is not None and self.class_metric_name is not None:
+                    class_label = f"{class_label}_{self.class_metric_name}"
+                return result[class_label]
             return result[self.class_idx]
 
         return result
@@ -553,6 +598,7 @@ class F1Metric(Metric):
         score_thresholds: list[float],
         metric_mode: str = "f1",
         report_per_class: bool = False,
+        class_names: list[str] | None = None,
     ):
         """Create a new F1Metric.
 
@@ -564,12 +610,15 @@ class F1Metric(Metric):
                 (default "f1")
             report_per_class: whether to return a dict with per-class scores and "avg"
                 score instead of just returning the scalar average score.
+            class_names: optional ordered class names to use instead of "cls_N" in
+                per-class metric keys.
         """
         super().__init__()
         self.num_classes = num_classes
         self.score_thresholds = score_thresholds
         self.metric_mode = metric_mode
         self.report_per_class = report_per_class
+        self.class_names = class_names
 
         assert self.metric_mode in ["f1", "precision", "recall"]
 
@@ -614,8 +663,10 @@ class F1Metric(Metric):
         """Compute metric.
 
         Returns:
-            the average F1 score, or, if report_per_class is True, a dict with "f1/avg"
-                key containing the average score and "f1/cls_N" keys for each class N.
+            the average F1 score, or, if report_per_class is True, a dict containing
+                the average and one score per class. Named classes use classification's
+                class-first convention, such as "wheat_f1"; without class names, the
+                existing "f1/avg" and "f1/cls_N" keys are preserved.
         """
         cls_best_scores = {}
 
@@ -654,12 +705,19 @@ class F1Metric(Metric):
                 if best_score is None or score > best_score:
                     best_score = score
 
-            cls_best_scores[f"f1/cls_{cls_idx}"] = best_score
+            class_label = _get_class_label(self.class_names, cls_idx)
+            if self.class_names is not None:
+                cls_best_scores[f"{class_label}_{self.metric_mode}"] = best_score
+            else:
+                cls_best_scores[f"f1/{class_label}"] = best_score
 
         average_score = torch.mean(torch.stack(list(cls_best_scores.values())))
 
         if self.report_per_class:
-            report_scores = {"f1/avg": average_score}
+            average_key = (
+                f"avg_{self.metric_mode}" if self.class_names is not None else "f1/avg"
+            )
+            report_scores = {average_key: average_score}
             report_scores.update(cls_best_scores)
             return report_scores
         else:
@@ -684,6 +742,7 @@ class MeanIoUMetric(Metric):
         nodata_value: int | None = None,
         ignore_missing_classes: bool = False,
         report_per_class: bool = False,
+        class_names: list[str] | None = None,
     ):
         """Create a new MeanIoUMetric.
 
@@ -695,15 +754,17 @@ class MeanIoUMetric(Metric):
             ignore_missing_classes: whether to ignore classes that don't appear in
                 either the predictions or the ground truth. If false, the IoU for a
                 missing class will be 0.
-            report_per_class: whether to return a dict with per-class mean IoU scores
-                and "avg" average across classes instead of returning the scalar
-                average only.
+            report_per_class: whether to return per-class IoU scores in addition to the
+                mean score instead of returning only the scalar average.
+            class_names: optional ordered class names to use instead of "cls_N" in
+                per-class metric keys.
         """
         super().__init__()
         self.num_classes = num_classes
         self.nodata_value = nodata_value
         self.ignore_missing_classes = ignore_missing_classes
         self.report_per_class = report_per_class
+        self.class_names = class_names
 
         self.add_state(
             "intersections", default=torch.zeros(self.num_classes), dist_reduce_fx="sum"
@@ -744,9 +805,10 @@ class MeanIoUMetric(Metric):
         """Compute metric.
 
         Returns:
-            the mean IoU score, or, if report_per_class is true, a dict with
-            "mean_iou/avg" key containing the mean IoU across classes and
-            "mean_iou/cls_N" keys containing the mean IoU for each class N.
+            the mean IoU score, or, if report_per_class is true, a dict containing
+            the average and one score per class. Named classes use keys like
+            "wheat_mean_iou"; without class names, the existing "mean_iou/avg" and
+            "mean_iou/cls_N" keys are preserved.
         """
         cls_scores = {}
         valid_scores = []
@@ -765,13 +827,20 @@ class MeanIoUMetric(Metric):
                 score = torch.zeros_like(intersection)
             else:
                 score = intersection / union
-            cls_scores[f"mean_iou/cls_{cls_idx}"] = score
+            class_label = _get_class_label(self.class_names, cls_idx)
+            if self.class_names is not None:
+                cls_scores[f"{class_label}_mean_iou"] = score
+            else:
+                cls_scores[f"mean_iou/{class_label}"] = score
             valid_scores.append(score)
 
         mean_iou = torch.mean(torch.stack(valid_scores))
 
         if self.report_per_class:
-            report_scores = {"mean_iou/avg": mean_iou}
+            average_key = (
+                "avg_mean_iou" if self.class_names is not None else "mean_iou/avg"
+            )
+            report_scores = {average_key: mean_iou}
             report_scores.update(cls_scores)
             return report_scores
         else:
