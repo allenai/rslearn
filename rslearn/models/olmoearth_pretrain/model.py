@@ -2,6 +2,7 @@
 
 import copy
 import json
+import os
 import warnings
 from contextlib import nullcontext
 from dataclasses import dataclass
@@ -79,6 +80,7 @@ class OlmoEarth(FeatureExtractor):
         autocast_dtype: str | None = "bfloat16",
         token_pooling: bool = True,
         use_register_bottleneck_output: bool = False,
+        projected_register_dim: int | None = None,
         use_legacy_timestamps: bool = True,
         timestamp_error_tolerance: timedelta = timedelta(days=15),
         normalize: bool = False,
@@ -110,6 +112,16 @@ class OlmoEarth(FeatureExtractor):
             token_pooling: whether or not to pool the tokens. If True, the output will be BxCxHxW. If False,
                 there will be an extra dimension, N, (BxCxHxWxN) representing the temporal and channel
                 dimensions.
+            projected_register_dim: read the detached low-dim student
+                (``projected_registers``) instead of the teacher registers, keeping its
+                first N dimensions. Distilled checkpoints emit both heads, and the
+                teacher is the default, so this is what selects the student. N is a
+                Matryoshka prefix: the student is trained so that ``[..., :N]`` is
+                itself a strong embedding, for each trained width. Requires
+                use_register_bottleneck_output. Falls back to the
+                OE_PROJECTED_REGISTER_DIM environment variable when unset, but prefer
+                setting it here: an env var does not appear in the model config, so a
+                stored artifact would not record which head produced it.
             use_register_bottleneck_output: return the model's spatial register
                 bottleneck latents instead of the encoder patch tokens. The model must
                 have a register bottleneck (e.g. "regbtl" checkpoints); its register
@@ -207,6 +219,15 @@ class OlmoEarth(FeatureExtractor):
             self.model.apply_compile()
         self.token_pooling = token_pooling
         self.use_register_bottleneck_output = use_register_bottleneck_output
+        if projected_register_dim is None:
+            env_dim = os.environ.get("OE_PROJECTED_REGISTER_DIM")
+            projected_register_dim = int(env_dim) if env_dim else None
+        if projected_register_dim is not None and not use_register_bottleneck_output:
+            raise ValueError(
+                "projected_register_dim requires use_register_bottleneck_output=True "
+                "(the student only exists under the register bottleneck)"
+            )
+        self.projected_register_dim = projected_register_dim
         self.use_legacy_timestamps = use_legacy_timestamps
         self.timestamp_error_tolerance = timestamp_error_tolerance
 
@@ -775,9 +796,25 @@ class OlmoEarth(FeatureExtractor):
                     "use_register_bottleneck_output=True but the model output has no "
                     "'registers' key; the loaded model must have a register bottleneck"
                 )
-            registers = model_output["registers"]  # [B, n_h*n_w, D]
-            n_h, n_w = self.model.register_bottleneck.register_grid
-            features = rearrange(registers, "b (h w) d -> b d h w", h=n_h, w=n_w)
+            registers = model_output["registers"]
+            if self.projected_register_dim is not None:
+                if "projected_registers" not in model_output:
+                    raise ValueError(
+                        "projected_register_dim is set but the model output has no "
+                        "'projected_registers'; this checkpoint has no detached "
+                        "register student"
+                    )
+                registers = model_output["projected_registers"][
+                    ..., : self.projected_register_dim
+                ]
+            # olmoearth_pretrain d3e0941 reshaped both register outputs from
+            # [B, n_h*n_w, D] to [B, n_h, n_w, D]. Accept either, so this works with
+            # checkpoints and package versions from both sides of that change.
+            if registers.ndim == 4:
+                features = rearrange(registers, "b h w d -> b d h w")
+            else:
+                n_h, n_w = self.model.register_bottleneck.register_grid
+                features = rearrange(registers, "b (h w) d -> b d h w", h=n_h, w=n_w)
             return FeatureMaps([features])
 
         # Apply temporal/modality pooling so we just have one feature per patch.
