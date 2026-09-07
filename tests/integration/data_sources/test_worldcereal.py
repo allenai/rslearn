@@ -1,3 +1,4 @@
+import hashlib
 import pathlib
 import zipfile
 
@@ -102,6 +103,18 @@ def _setup_worldcereal_httpserver(
         httpserver.expect_request(f"/{zip_file}", method="GET").respond_with_data(
             zip_data, content_type="application/zip"
         )
+
+        # ZENODO_FILES_DATA hardcodes the real production Zenodo URL, size, and
+        # checksum for each file. Point it at our local httpserver instead, and
+        # patch the size/checksum to match our small generated fixture zip, so
+        # the test exercises the download path against a controlled server
+        # rather than (accidentally) hitting production Zenodo.
+        for file_data in WorldCereal.ZENODO_FILES_DATA:
+            if file_data["filename"] != zip_file:
+                continue
+            file_data["filesize"] = float(len(zip_data))
+            file_data["checksum"] = hashlib.md5(zip_data).hexdigest()
+            file_data["links"]["download"] = httpserver.url_for(f"/{zip_file}")
 
 
 def test_with_worldcereal_dir(

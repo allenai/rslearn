@@ -1,10 +1,12 @@
 """Data source for ESA WorldCover 2021."""
 
 import functools
+import hashlib
 import json
 import os
 import shutil
 import tempfile
+import time
 import zipfile
 
 import requests
@@ -15,6 +17,7 @@ from rslearn.config import LayerType
 from rslearn.data_sources.local_files import LocalFiles, RasterItemSpec
 from rslearn.log_utils import get_logger
 from rslearn.utils.fsspec import get_upath_local, join_upath, open_atomic
+from rslearn.utils.retry_session import create_retry_session
 
 from .data_source import DataSourceContext, Item
 
@@ -51,7 +54,31 @@ class WorldCereal(LocalFiles):
         "WorldCereal_2021_tc-wintercereals_wintercereals_confidence.zip",
         "WorldCereal_2021_tc-wintercereals_wintercereals_classification.zip",
     ]
-    TIMEOUT_SECONDS = 10
+    # Timeouts for downloading files from Zenodo. CONNECT_TIMEOUT_SECONDS bounds how
+    # long we wait to establish the connection; READ_TIMEOUT_SECONDS bounds how long
+    # we wait between chunks once the download is underway. These files are
+    # multi-gigabyte, and Zenodo can stall well past 10 seconds between chunks, so
+    # the read timeout needs to be generous.
+    CONNECT_TIMEOUT_SECONDS = 10
+    READ_TIMEOUT_SECONDS = 60
+
+    # Number of bytes to read from the response stream at a time.
+    DOWNLOAD_CHUNK_SIZE = 1024 * 1024
+
+    # Number of attempts for a single file download before giving up. Each retry
+    # resumes from wherever the previous attempt left off, see
+    # _download_with_resume.
+    MAX_DOWNLOAD_ATTEMPTS = 5
+    DOWNLOAD_RETRY_BACKOFF_SECONDS = 5.0
+
+    # Exceptions that indicate a transient network problem worth retrying (as
+    # opposed to e.g. a 404 from a bad URL, which raise_for_status will turn into an
+    # HTTPError that should not be retried).
+    RETRIABLE_DOWNLOAD_EXCEPTIONS = (
+        requests.exceptions.Timeout,
+        requests.exceptions.ConnectionError,
+        requests.exceptions.ChunkedEncodingError,
+    )
 
     # this can be obtained using the following code:
     # ```
@@ -337,6 +364,144 @@ class WorldCereal(LocalFiles):
             return aez_file[0]
         raise ValueError(f"Got more than one tif for {aez} in {path_to_tifs}")
 
+    @staticmethod
+    def _compute_md5(local_path: str) -> str:
+        """Compute the MD5 checksum of a local file, reading it in chunks."""
+        hasher = hashlib.md5()
+        with open(local_path, "rb") as f:
+            for chunk in iter(lambda: f.read(1024 * 1024), b""):
+                hasher.update(chunk)
+        return hasher.hexdigest()
+
+    @classmethod
+    def _download_with_resume(
+        cls,
+        file_url: str,
+        dest_path: UPath,
+        expected_size: int,
+        expected_checksum: str,
+    ) -> None:
+        """Download a file, resuming interrupted attempts and verifying checksums.
+
+        Partial data is written to a stably-named temporary file (rather than a
+        per-process name) so that if the download is interrupted -- by a timeout, a
+        dropped connection, or the process being killed -- a later attempt can
+        resume from the byte offset it reached via an HTTP Range request instead of
+        starting over. Once a download completes, its size and MD5 checksum are
+        verified against the values Zenodo reports before it is atomically renamed
+        into place; a mismatch is treated as corruption and triggers a retry from
+        scratch.
+
+        Args:
+            file_url: the URL to download from.
+            dest_path: the destination path for the completed download.
+            expected_size: the expected size of the file in bytes.
+            expected_checksum: the expected MD5 checksum of the file.
+        """
+        if not isinstance(dest_path.fs, LocalFileSystem):
+            # Resuming requires a stable local temp file to resume from, so for
+            # remote filesystems we fall back to a plain atomic download.
+            with requests.get(
+                file_url,
+                stream=True,
+                timeout=(cls.CONNECT_TIMEOUT_SECONDS, cls.READ_TIMEOUT_SECONDS),
+            ) as r:
+                r.raise_for_status()
+                with open_atomic(dest_path, "wb") as f:
+                    for chunk in r.iter_content(chunk_size=cls.DOWNLOAD_CHUNK_SIZE):
+                        f.write(chunk)
+            return
+
+        session = create_retry_session()
+        tmp_path = dest_path.path + ".partial"
+
+        for attempt in range(1, cls.MAX_DOWNLOAD_ATTEMPTS + 1):
+            resume_from = os.path.getsize(tmp_path) if os.path.exists(tmp_path) else 0
+            if resume_from >= expected_size:
+                # A previous attempt wrote at least the expected number of bytes
+                # but was interrupted before we could verify/rename it. Discard it
+                # and start over rather than trying to resume past the end.
+                resume_from = 0
+
+            headers = {"Range": f"bytes={resume_from}-"} if resume_from > 0 else {}
+            mode = "ab" if resume_from > 0 else "wb"
+
+            try:
+                with session.get(
+                    file_url,
+                    stream=True,
+                    timeout=(cls.CONNECT_TIMEOUT_SECONDS, cls.READ_TIMEOUT_SECONDS),
+                    headers=headers,
+                ) as r:
+                    if (
+                        resume_from > 0
+                        and r.status_code != requests.codes.partial_content
+                    ):
+                        # The server did not honor our Range request, so the
+                        # response body starts from byte 0. Restart from scratch.
+                        logger.warning(
+                            "server did not support resuming download of %s "
+                            "(status %d), restarting from scratch",
+                            file_url,
+                            r.status_code,
+                        )
+                        resume_from = 0
+                        mode = "wb"
+                    r.raise_for_status()
+                    with open(tmp_path, mode) as f:
+                        for chunk in r.iter_content(chunk_size=cls.DOWNLOAD_CHUNK_SIZE):
+                            f.write(chunk)
+            except cls.RETRIABLE_DOWNLOAD_EXCEPTIONS as e:
+                if attempt == cls.MAX_DOWNLOAD_ATTEMPTS:
+                    raise
+                logger.warning(
+                    "download of %s failed on attempt %d/%d (%s), will retry "
+                    "and resume from byte %d",
+                    file_url,
+                    attempt,
+                    cls.MAX_DOWNLOAD_ATTEMPTS,
+                    e,
+                    resume_from,
+                )
+                time.sleep(cls.DOWNLOAD_RETRY_BACKOFF_SECONDS * attempt)
+                continue
+
+            actual_size = os.path.getsize(tmp_path)
+            if actual_size != expected_size:
+                logger.warning(
+                    "downloaded size %d for %s does not match expected size %d",
+                    actual_size,
+                    file_url,
+                    expected_size,
+                )
+                if attempt == cls.MAX_DOWNLOAD_ATTEMPTS:
+                    raise ValueError(
+                        f"downloaded size {actual_size} for {file_url} does not "
+                        f"match expected size {expected_size} after "
+                        f"{cls.MAX_DOWNLOAD_ATTEMPTS} attempts"
+                    )
+                continue
+
+            actual_checksum = cls._compute_md5(tmp_path)
+            if actual_checksum != expected_checksum:
+                logger.warning(
+                    "checksum mismatch for %s (got %s, expected %s), discarding "
+                    "downloaded data and retrying",
+                    file_url,
+                    actual_checksum,
+                    expected_checksum,
+                )
+                os.remove(tmp_path)
+                if attempt == cls.MAX_DOWNLOAD_ATTEMPTS:
+                    raise ValueError(
+                        f"checksum mismatch for {file_url} after "
+                        f"{cls.MAX_DOWNLOAD_ATTEMPTS} attempts"
+                    )
+                continue
+
+            os.rename(tmp_path, dest_path.path)
+            return
+
     @classmethod
     def download_worldcereal_data(
         cls, band: str, worldcereal_dir: UPath
@@ -380,13 +545,13 @@ class WorldCereal(LocalFiles):
         # Determine full filepath and create necessary folders for nested structure
         zip_filepath = zip_dir / filename
         if not zip_filepath.exists():
-            # Download the file with resume support
             logger.debug(f"Downloading {file_url} to {zip_filepath}")
-            with requests.get(file_url, stream=True, timeout=cls.TIMEOUT_SECONDS) as r:
-                r.raise_for_status()
-                with open_atomic(zip_filepath, "wb") as f:
-                    for chunk in r.iter_content(chunk_size=8192):
-                        f.write(chunk)
+            cls._download_with_resume(
+                file_url=file_url,
+                dest_path=zip_filepath,
+                expected_size=int(file_to_download["filesize"]),
+                expected_checksum=file_to_download["checksum"],
+            )
 
         # Extract the zip files.
         # We use a .extraction_complete file to indicate that the extraction is done.
