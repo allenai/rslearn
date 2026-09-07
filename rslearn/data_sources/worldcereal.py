@@ -16,7 +16,7 @@ from upath import UPath
 from rslearn.config import LayerType
 from rslearn.data_sources.local_files import LocalFiles, RasterItemSpec
 from rslearn.log_utils import get_logger
-from rslearn.utils.fsspec import get_upath_local, join_upath, open_atomic
+from rslearn.utils.fsspec import get_upath_local, join_upath
 from rslearn.utils.retry_session import create_retry_session
 
 from .data_source import DataSourceContext, Item
@@ -74,17 +74,33 @@ class WorldCereal(LocalFiles):
 
     # Number of consecutive chunk failures to tolerate (with backoff) before
     # giving up entirely. Since each chunk is capped at RANGE_SIZE_BYTES, a
-    # failure only costs progress on the current chunk, not the whole file.
+    # failure only costs progress on the current chunk, not the whole file. This
+    # is the *only* retry budget for a chunk request: the session used here is
+    # created with retries disabled (see create_retry_session(total_retries=0)
+    # in _download_to_local_path_with_resume) so that a persistent failure can't
+    # multiply into (adapter retries) x (this loop's retries) requests.
     MAX_DOWNLOAD_ATTEMPTS = 5
     DOWNLOAD_RETRY_BACKOFF_SECONDS = 5.0
 
     # Exceptions that indicate a transient network problem worth retrying (as
-    # opposed to e.g. a 404 from a bad URL, which raise_for_status will turn into an
-    # HTTPError that should not be retried).
+    # opposed to e.g. a 404 from a bad URL, which is not retried).
     RETRIABLE_DOWNLOAD_EXCEPTIONS = (
         requests.exceptions.Timeout,
         requests.exceptions.ConnectionError,
         requests.exceptions.ChunkedEncodingError,
+    )
+
+    # HTTP statuses worth retrying (mirrors the status_forcelist that
+    # create_retry_session would otherwise use, since we disable its automatic
+    # retries here in favor of a single retry budget).
+    RETRIABLE_STATUS_CODES = frozenset(
+        {
+            requests.codes.too_many_requests,
+            requests.codes.internal_server_error,
+            requests.codes.bad_gateway,
+            requests.codes.service_unavailable,
+            requests.codes.gateway_timeout,
+        }
     )
 
     # this can be obtained using the following code:
@@ -390,6 +406,44 @@ class WorldCereal(LocalFiles):
     ) -> None:
         """Download a file in bounded chunks, resuming and verifying checksums.
 
+        Args:
+            file_url: the URL to download from.
+            dest_path: the destination path for the completed download.
+            expected_size: the expected size of the file in bytes.
+            expected_checksum: the expected MD5 checksum of the file.
+        """
+        if isinstance(dest_path.fs, LocalFileSystem):
+            cls._download_to_local_path_with_resume(
+                file_url, dest_path.path, expected_size, expected_checksum
+            )
+            return
+
+        # Most object stores don't support appending to an object, and a write
+        # that's interrupted partway can leave a partial/corrupt object sitting
+        # at the final key with no atomicity -- which download_worldcereal_data's
+        # `if not zip_filepath.exists()` check would then treat as a complete
+        # download forever. So for remote destinations, stage the download (with
+        # the same bounded-chunk retrying and checksum verification used for
+        # local paths) to a local temp file first, and only copy it to the
+        # remote destination once it's verified complete and correct.
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            local_path = os.path.join(tmp_dir, "download")
+            cls._download_to_local_path_with_resume(
+                file_url, local_path, expected_size, expected_checksum
+            )
+            with open(local_path, "rb") as src, dest_path.open("wb") as dst:
+                shutil.copyfileobj(src, dst)
+
+    @classmethod
+    def _download_to_local_path_with_resume(
+        cls,
+        file_url: str,
+        local_path: str,
+        expected_size: int,
+        expected_checksum: str,
+    ) -> None:
+        """Download a file to a local path in bounded, retried, verified chunks.
+
         The file is fetched as a sequence of Range requests of at most
         RANGE_SIZE_BYTES each -- even on the very first chunk of a brand new
         download -- since Zenodo has been observed to reject or reset
@@ -403,29 +457,19 @@ class WorldCereal(LocalFiles):
         Zenodo reports before it is atomically renamed into place; a mismatch is
         treated as corruption, and the corrupt data is deleted.
 
+        Retries (for both transient network exceptions and retriable HTTP status
+        codes) are all funneled through a single MAX_DOWNLOAD_ATTEMPTS budget:
+        the underlying session has its own automatic retries disabled, so a
+        persistent failure can't multiply into two nested retry loops.
+
         Args:
             file_url: the URL to download from.
-            dest_path: the destination path for the completed download.
+            local_path: the local destination path for the completed download.
             expected_size: the expected size of the file in bytes.
             expected_checksum: the expected MD5 checksum of the file.
         """
-        if not isinstance(dest_path.fs, LocalFileSystem):
-            # Bounded-chunk resuming requires a stable local temp file to resume
-            # from, so for remote filesystems we fall back to a plain atomic
-            # download.
-            with requests.get(
-                file_url,
-                stream=True,
-                timeout=(cls.CONNECT_TIMEOUT_SECONDS, cls.READ_TIMEOUT_SECONDS),
-            ) as r:
-                r.raise_for_status()
-                with open_atomic(dest_path, "wb") as f:
-                    for chunk in r.iter_content(chunk_size=cls.DOWNLOAD_CHUNK_SIZE):
-                        f.write(chunk)
-            return
-
-        session = create_retry_session()
-        tmp_path = dest_path.path + ".partial"
+        session = create_retry_session(total_retries=0)
+        tmp_path = local_path + ".partial"
         consecutive_failures = 0
 
         while True:
@@ -435,6 +479,7 @@ class WorldCereal(LocalFiles):
 
             range_end = min(current_size + cls.RANGE_SIZE_BYTES, expected_size) - 1
             headers = {"Range": f"bytes={current_size}-{range_end}"}
+            failure_reason: Exception | str | None = None
 
             try:
                 with session.get(
@@ -443,29 +488,42 @@ class WorldCereal(LocalFiles):
                     timeout=(cls.CONNECT_TIMEOUT_SECONDS, cls.READ_TIMEOUT_SECONDS),
                     headers=headers,
                 ) as r:
-                    if r.status_code != requests.codes.partial_content:
-                        # The server ignored our Range request. Appending its
-                        # response body (which would start from byte 0) to our
-                        # partially-downloaded file would corrupt it, so bail out
-                        # entirely rather than retrying the same request.
+                    if r.status_code == requests.codes.partial_content:
+                        with open(tmp_path, "ab") as f:
+                            f.writelines(
+                                r.iter_content(chunk_size=cls.DOWNLOAD_CHUNK_SIZE)
+                            )
+                    elif r.status_code in cls.RETRIABLE_STATUS_CODES:
+                        failure_reason = f"status {r.status_code}"
+                    else:
+                        # The server returned something other than a partial
+                        # response or a known-transient status. Appending a
+                        # non-partial body (which would start from byte 0) to
+                        # our partially-downloaded file would corrupt it, so
+                        # bail out entirely rather than retrying the same
+                        # request.
                         raise ValueError(
                             f"server did not return a partial response for a "
                             f"range request to {file_url} (status "
                             f"{r.status_code}); cannot safely download in "
                             "bounded chunks"
                         )
-                    with open(tmp_path, "ab") as f:
-                        for chunk in r.iter_content(chunk_size=cls.DOWNLOAD_CHUNK_SIZE):
-                            f.write(chunk)
             except cls.RETRIABLE_DOWNLOAD_EXCEPTIONS as e:
+                failure_reason = e
+
+            if failure_reason is not None:
                 consecutive_failures += 1
                 if consecutive_failures >= cls.MAX_DOWNLOAD_ATTEMPTS:
-                    raise
+                    raise ValueError(
+                        f"download of {file_url} failed after "
+                        f"{cls.MAX_DOWNLOAD_ATTEMPTS} consecutive attempts "
+                        f"(last failure: {failure_reason})"
+                    )
                 logger.warning(
                     "chunk download of %s failed (%s), %d/%d consecutive "
                     "failures, retrying from byte %d",
                     file_url,
-                    e,
+                    failure_reason,
                     consecutive_failures,
                     cls.MAX_DOWNLOAD_ATTEMPTS,
                     os.path.getsize(tmp_path) if os.path.exists(tmp_path) else 0,
@@ -490,7 +548,7 @@ class WorldCereal(LocalFiles):
                 f"expected {expected_checksum}); deleted corrupt download"
             )
 
-        os.rename(tmp_path, dest_path.path)
+        os.rename(tmp_path, local_path)
 
     @classmethod
     def download_worldcereal_data(

@@ -1,3 +1,4 @@
+import copy
 import hashlib
 import os
 import pathlib
@@ -119,14 +120,28 @@ def _make_range_handler(zip_data: bytes) -> Any:
 
 
 def _setup_worldcereal_httpserver(
-    worldcereal_dir: UPath, httpserver: HTTPServer
+    worldcereal_dir: UPath, httpserver: HTTPServer, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """Create test zips and configure httpserver to serve them.
 
     Args:
         worldcereal_dir: directory to create test zips in.
         httpserver: the pytest httpserver to configure.
+        monkeypatch: used to patch WorldCereal.ZENODO_FILES_DATA for the duration
+            of the test rather than mutating the class-level list in place, since
+            that list is shared across the whole test session.
     """
+    # ZENODO_FILES_DATA hardcodes the real production Zenodo URL, size, and
+    # checksum for each file. Point it at our local httpserver instead, and patch
+    # the size/checksum to match our small generated fixture zips, so the test
+    # exercises the download path against a controlled server rather than
+    # (accidentally) hitting production Zenodo. Patch a deep copy via monkeypatch
+    # (rather than mutating WorldCereal.ZENODO_FILES_DATA's dicts in place) so the
+    # original production metadata is restored after this test, and other tests
+    # in the same session don't inherit stale localhost URLs.
+    zenodo_files_data = copy.deepcopy(WorldCereal.ZENODO_FILES_DATA)
+    monkeypatch.setattr(WorldCereal, "ZENODO_FILES_DATA", zenodo_files_data)
+
     zip_name_paths = _make_test_zips(worldcereal_dir)
     for zip_file, zip_fname in zip_name_paths.items():
         with zip_fname.open("rb") as f:
@@ -135,12 +150,7 @@ def _setup_worldcereal_httpserver(
             _make_range_handler(zip_data)
         )
 
-        # ZENODO_FILES_DATA hardcodes the real production Zenodo URL, size, and
-        # checksum for each file. Point it at our local httpserver instead, and
-        # patch the size/checksum to match our small generated fixture zip, so
-        # the test exercises the download path against a controlled server
-        # rather than (accidentally) hitting production Zenodo.
-        for file_data in WorldCereal.ZENODO_FILES_DATA:
+        for file_data in zenodo_files_data:
             if file_data["filename"] != zip_file:
                 continue
             file_data["filesize"] = float(len(zip_data))
@@ -190,14 +200,136 @@ def test_download_with_resume_multi_chunk(
     assert request_count == 10
 
 
+def test_download_with_resume_continues_from_partial_file(
+    tmp_path: pathlib.Path, httpserver: HTTPServer
+) -> None:
+    """A pre-existing .partial file is resumed from its exact byte offset.
+
+    Simulates the interrupted-download scenario the fix targets: a previous
+    attempt left some bytes on disk, and the next attempt must continue from
+    there via a Range request rather than restarting from byte 0.
+    """
+    data = os.urandom(5_000)
+    checksum = hashlib.md5(data).hexdigest()
+    seen_ranges: list[str] = []
+
+    def handler(request: Request) -> Response:
+        range_header = request.headers["Range"]
+        seen_ranges.append(range_header)
+        start_str, _, end_str = range_header.split("=", 1)[1].partition("-")
+        start, end = int(start_str), min(int(end_str), len(data) - 1)
+        response = Response(
+            data[start : end + 1], status=206, content_type="application/octet-stream"
+        )
+        response.headers["Content-Range"] = f"bytes {start}-{end}/{len(data)}"
+        return response
+
+    httpserver.expect_request("/file", method="GET").respond_with_handler(handler)
+
+    dest_path = UPath(tmp_path) / "file.bin"
+    prefix_len = 2000
+    with open(dest_path.path + ".partial", "wb") as f:
+        f.write(data[:prefix_len])
+
+    WorldCereal._download_with_resume(
+        file_url=httpserver.url_for("/file"),
+        dest_path=dest_path,
+        expected_size=len(data),
+        expected_checksum=checksum,
+    )
+
+    with dest_path.open("rb") as f:
+        assert f.read() == data
+    assert seen_ranges == [f"bytes={prefix_len}-{len(data) - 1}"]
+
+
+def test_download_with_resume_checksum_mismatch_raises_and_cleans_up(
+    tmp_path: pathlib.Path, httpserver: HTTPServer
+) -> None:
+    """A completed download that fails checksum verification is deleted, not kept."""
+    data = os.urandom(5_000)
+    wrong_checksum = hashlib.md5(b"not the right data").hexdigest()
+
+    def handler(request: Request) -> Response:
+        start_str, _, end_str = request.headers["Range"].split("=", 1)[1].partition("-")
+        start, end = int(start_str), min(int(end_str), len(data) - 1)
+        response = Response(
+            data[start : end + 1], status=206, content_type="application/octet-stream"
+        )
+        response.headers["Content-Range"] = f"bytes {start}-{end}/{len(data)}"
+        return response
+
+    httpserver.expect_request("/file", method="GET").respond_with_handler(handler)
+
+    dest_path = UPath(tmp_path) / "file.bin"
+    with pytest.raises(ValueError, match="checksum mismatch"):
+        WorldCereal._download_with_resume(
+            file_url=httpserver.url_for("/file"),
+            dest_path=dest_path,
+            expected_size=len(data),
+            expected_checksum=wrong_checksum,
+        )
+
+    assert not dest_path.exists()
+    assert not pathlib.Path(dest_path.path + ".partial").exists()
+
+
+def test_download_with_resume_remote_destination_verifies_before_publishing(
+    httpserver: HTTPServer,
+) -> None:
+    """Remote destinations get the same retry/checksum validation as local ones.
+
+    Uses fsspec's in-memory filesystem to stand in for a remote (non-local)
+    destination cheaply. Downloads are staged to a local temp file and verified
+    before being copied to the destination, so a checksum mismatch must not
+    leave a corrupt object behind at the final remote path -- unlike the
+    previous version, which wrote directly to the remote destination with no
+    retry or verification at all.
+    """
+    data = os.urandom(5_000)
+    checksum = hashlib.md5(data).hexdigest()
+
+    def handler(request: Request) -> Response:
+        start_str, _, end_str = request.headers["Range"].split("=", 1)[1].partition("-")
+        start, end = int(start_str), min(int(end_str), len(data) - 1)
+        response = Response(
+            data[start : end + 1], status=206, content_type="application/octet-stream"
+        )
+        response.headers["Content-Range"] = f"bytes {start}-{end}/{len(data)}"
+        return response
+
+    httpserver.expect_request("/file", method="GET").respond_with_handler(handler)
+
+    good_dest = UPath("memory://worldcereal_test/good/file.bin")
+    WorldCereal._download_with_resume(
+        file_url=httpserver.url_for("/file"),
+        dest_path=good_dest,
+        expected_size=len(data),
+        expected_checksum=checksum,
+    )
+    with good_dest.open("rb") as f:
+        assert f.read() == data
+
+    bad_dest = UPath("memory://worldcereal_test/bad/file.bin")
+    with pytest.raises(ValueError, match="checksum mismatch"):
+        WorldCereal._download_with_resume(
+            file_url=httpserver.url_for("/file"),
+            dest_path=bad_dest,
+            expected_size=len(data),
+            expected_checksum=hashlib.md5(b"wrong").hexdigest(),
+        )
+    assert not bad_dest.exists()
+
+
 def test_with_worldcereal_dir(
     tmp_path: pathlib.Path,
     seattle2020: STGeometry,
     httpserver: HTTPServer,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Tests ingesting the example data corresponding to seattle2020."""
     worldcereal_dir = UPath(tmp_path) / "worldcereal"
-    _setup_worldcereal_httpserver(worldcereal_dir, httpserver)
+    _setup_worldcereal_httpserver(worldcereal_dir, httpserver, monkeypatch)
 
     bands = [WorldCereal.band_from_zipfilename(f) for f in WorldCereal.ZIP_FILENAMES]
     for band in bands:
@@ -242,6 +374,7 @@ def test_with_context_ds_path(
     tmp_path: pathlib.Path,
     seattle2020: STGeometry,
     httpserver: HTTPServer,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Tests WorldCereal when context.ds_path is set.
 
@@ -257,7 +390,7 @@ def test_with_context_ds_path(
     worldcereal_dir = "worldcereal_data"
     worldcereal_abs_path = ds_path / worldcereal_dir
 
-    _setup_worldcereal_httpserver(worldcereal_abs_path, httpserver)
+    _setup_worldcereal_httpserver(worldcereal_abs_path, httpserver, monkeypatch)
 
     # Test with just the first band to keep the test fast
     band = WorldCereal.band_from_zipfilename(WorldCereal.ZIP_FILENAMES[0])
