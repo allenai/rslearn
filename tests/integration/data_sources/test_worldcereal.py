@@ -1,11 +1,15 @@
 import hashlib
+import os
 import pathlib
 import zipfile
+from typing import Any
 
 import numpy as np
+import pytest
 import shapely
 from pytest_httpserver import HTTPServer
 from upath import UPath
+from werkzeug.wrappers import Request, Response
 
 from rslearn.config import (
     QueryConfig,
@@ -87,6 +91,33 @@ def _make_test_zips(tmp_path: pathlib.Path) -> dict[str, pathlib.Path]:
     return return_dict
 
 
+def _make_range_handler(zip_data: bytes) -> Any:
+    """Build a handler that serves zip_data honoring Range: bytes=start-end requests.
+
+    WorldCereal._download_with_resume always fetches in bounded Range requests
+    (even for the first chunk of a brand new download), so the test server needs
+    to respond with real 206 Partial Content responses rather than pytest
+    httpserver's default of always returning the full body with 200.
+    """
+
+    def handler(request: Request) -> Response:
+        range_header = request.headers.get("Range")
+        if not range_header:
+            return Response(zip_data, status=200, content_type="application/zip")
+        range_spec = range_header.split("=", 1)[1]
+        start_str, _, end_str = range_spec.partition("-")
+        start = int(start_str)
+        end = int(end_str) if end_str else len(zip_data) - 1
+        end = min(end, len(zip_data) - 1)
+        response = Response(
+            zip_data[start : end + 1], status=206, content_type="application/zip"
+        )
+        response.headers["Content-Range"] = f"bytes {start}-{end}/{len(zip_data)}"
+        return response
+
+    return handler
+
+
 def _setup_worldcereal_httpserver(
     worldcereal_dir: UPath, httpserver: HTTPServer
 ) -> None:
@@ -100,8 +131,8 @@ def _setup_worldcereal_httpserver(
     for zip_file, zip_fname in zip_name_paths.items():
         with zip_fname.open("rb") as f:
             zip_data = f.read()
-        httpserver.expect_request(f"/{zip_file}", method="GET").respond_with_data(
-            zip_data, content_type="application/zip"
+        httpserver.expect_request(f"/{zip_file}", method="GET").respond_with_handler(
+            _make_range_handler(zip_data)
         )
 
         # ZENODO_FILES_DATA hardcodes the real production Zenodo URL, size, and
@@ -115,6 +146,48 @@ def _setup_worldcereal_httpserver(
             file_data["filesize"] = float(len(zip_data))
             file_data["checksum"] = hashlib.md5(zip_data).hexdigest()
             file_data["links"]["download"] = httpserver.url_for(f"/{zip_file}")
+
+
+def test_download_with_resume_multi_chunk(
+    tmp_path: pathlib.Path, httpserver: HTTPServer, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """WorldCereal._download_with_resume fetches files as many bounded chunks.
+
+    The other integration tests use tiny fixture zips that fit in a single
+    RANGE_SIZE_BYTES chunk, so they wouldn't catch a bug in reassembling multiple
+    chunks. This forces a small RANGE_SIZE_BYTES so a small file is fetched across
+    many separate Range requests, and checks that the request count matches and
+    the reassembled bytes/checksum are correct.
+    """
+    data = os.urandom(10_000)
+    checksum = hashlib.md5(data).hexdigest()
+    request_count = 0
+
+    def handler(request: Request) -> Response:
+        nonlocal request_count
+        request_count += 1
+        start_str, _, end_str = request.headers["Range"].split("=", 1)[1].partition("-")
+        start, end = int(start_str), min(int(end_str), len(data) - 1)
+        response = Response(
+            data[start : end + 1], status=206, content_type="application/octet-stream"
+        )
+        response.headers["Content-Range"] = f"bytes {start}-{end}/{len(data)}"
+        return response
+
+    httpserver.expect_request("/file", method="GET").respond_with_handler(handler)
+    monkeypatch.setattr(WorldCereal, "RANGE_SIZE_BYTES", 1000)
+
+    dest_path = UPath(tmp_path) / "file.bin"
+    WorldCereal._download_with_resume(
+        file_url=httpserver.url_for("/file"),
+        dest_path=dest_path,
+        expected_size=len(data),
+        expected_checksum=checksum,
+    )
+
+    with dest_path.open("rb") as f:
+        assert f.read() == data
+    assert request_count == 10
 
 
 def test_with_worldcereal_dir(

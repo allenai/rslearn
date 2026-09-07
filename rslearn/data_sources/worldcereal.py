@@ -65,9 +65,16 @@ class WorldCereal(LocalFiles):
     # Number of bytes to read from the response stream at a time.
     DOWNLOAD_CHUNK_SIZE = 1024 * 1024
 
-    # Number of attempts for a single file download before giving up. Each retry
-    # resumes from wherever the previous attempt left off, see
-    # _download_with_resume.
+    # Maximum size of a single ranged HTTP request. Zenodo has been observed to
+    # reject/reset multi-gigabyte single-range requests, and to return 504 for an
+    # unranged full-file GET on the largest archives, even though small ranges
+    # succeed reliably. So we always fetch in bounded chunks -- even for a brand
+    # new download -- rather than only using Range requests once resuming.
+    RANGE_SIZE_BYTES = 128 * 1024 * 1024
+
+    # Number of consecutive chunk failures to tolerate (with backoff) before
+    # giving up entirely. Since each chunk is capped at RANGE_SIZE_BYTES, a
+    # failure only costs progress on the current chunk, not the whole file.
     MAX_DOWNLOAD_ATTEMPTS = 5
     DOWNLOAD_RETRY_BACKOFF_SECONDS = 5.0
 
@@ -381,16 +388,20 @@ class WorldCereal(LocalFiles):
         expected_size: int,
         expected_checksum: str,
     ) -> None:
-        """Download a file, resuming interrupted attempts and verifying checksums.
+        """Download a file in bounded chunks, resuming and verifying checksums.
 
-        Partial data is written to a stably-named temporary file (rather than a
-        per-process name) so that if the download is interrupted -- by a timeout, a
-        dropped connection, or the process being killed -- a later attempt can
-        resume from the byte offset it reached via an HTTP Range request instead of
-        starting over. Once a download completes, its size and MD5 checksum are
-        verified against the values Zenodo reports before it is atomically renamed
-        into place; a mismatch is treated as corruption and triggers a retry from
-        scratch.
+        The file is fetched as a sequence of Range requests of at most
+        RANGE_SIZE_BYTES each -- even on the very first chunk of a brand new
+        download -- since Zenodo has been observed to reject or reset
+        multi-gigabyte single-range transfers, and to return 504 for an unranged
+        full-file GET on the largest archives. Downloaded bytes are appended to a
+        stably-named temporary file (rather than a per-process name) so that if
+        the download is interrupted -- by a timeout, a dropped connection, or the
+        process being killed -- a later attempt resumes from the exact byte
+        offset already on disk instead of starting over. Once the full file has
+        been fetched, its size and MD5 checksum are verified against the values
+        Zenodo reports before it is atomically renamed into place; a mismatch is
+        treated as corruption, and the corrupt data is deleted.
 
         Args:
             file_url: the URL to download from.
@@ -399,8 +410,9 @@ class WorldCereal(LocalFiles):
             expected_checksum: the expected MD5 checksum of the file.
         """
         if not isinstance(dest_path.fs, LocalFileSystem):
-            # Resuming requires a stable local temp file to resume from, so for
-            # remote filesystems we fall back to a plain atomic download.
+            # Bounded-chunk resuming requires a stable local temp file to resume
+            # from, so for remote filesystems we fall back to a plain atomic
+            # download.
             with requests.get(
                 file_url,
                 stream=True,
@@ -414,17 +426,15 @@ class WorldCereal(LocalFiles):
 
         session = create_retry_session()
         tmp_path = dest_path.path + ".partial"
+        consecutive_failures = 0
 
-        for attempt in range(1, cls.MAX_DOWNLOAD_ATTEMPTS + 1):
-            resume_from = os.path.getsize(tmp_path) if os.path.exists(tmp_path) else 0
-            if resume_from >= expected_size:
-                # A previous attempt wrote at least the expected number of bytes
-                # but was interrupted before we could verify/rename it. Discard it
-                # and start over rather than trying to resume past the end.
-                resume_from = 0
+        while True:
+            current_size = os.path.getsize(tmp_path) if os.path.exists(tmp_path) else 0
+            if current_size >= expected_size:
+                break
 
-            headers = {"Range": f"bytes={resume_from}-"} if resume_from > 0 else {}
-            mode = "ab" if resume_from > 0 else "wb"
+            range_end = min(current_size + cls.RANGE_SIZE_BYTES, expected_size) - 1
+            headers = {"Range": f"bytes={current_size}-{range_end}"}
 
             try:
                 with session.get(
@@ -433,74 +443,54 @@ class WorldCereal(LocalFiles):
                     timeout=(cls.CONNECT_TIMEOUT_SECONDS, cls.READ_TIMEOUT_SECONDS),
                     headers=headers,
                 ) as r:
-                    if (
-                        resume_from > 0
-                        and r.status_code != requests.codes.partial_content
-                    ):
-                        # The server did not honor our Range request, so the
-                        # response body starts from byte 0. Restart from scratch.
-                        logger.warning(
-                            "server did not support resuming download of %s "
-                            "(status %d), restarting from scratch",
-                            file_url,
-                            r.status_code,
+                    if r.status_code != requests.codes.partial_content:
+                        # The server ignored our Range request. Appending its
+                        # response body (which would start from byte 0) to our
+                        # partially-downloaded file would corrupt it, so bail out
+                        # entirely rather than retrying the same request.
+                        raise ValueError(
+                            f"server did not return a partial response for a "
+                            f"range request to {file_url} (status "
+                            f"{r.status_code}); cannot safely download in "
+                            "bounded chunks"
                         )
-                        resume_from = 0
-                        mode = "wb"
-                    r.raise_for_status()
-                    with open(tmp_path, mode) as f:
+                    with open(tmp_path, "ab") as f:
                         for chunk in r.iter_content(chunk_size=cls.DOWNLOAD_CHUNK_SIZE):
                             f.write(chunk)
             except cls.RETRIABLE_DOWNLOAD_EXCEPTIONS as e:
-                if attempt == cls.MAX_DOWNLOAD_ATTEMPTS:
+                consecutive_failures += 1
+                if consecutive_failures >= cls.MAX_DOWNLOAD_ATTEMPTS:
                     raise
                 logger.warning(
-                    "download of %s failed on attempt %d/%d (%s), will retry "
-                    "and resume from byte %d",
+                    "chunk download of %s failed (%s), %d/%d consecutive "
+                    "failures, retrying from byte %d",
                     file_url,
-                    attempt,
-                    cls.MAX_DOWNLOAD_ATTEMPTS,
                     e,
-                    resume_from,
+                    consecutive_failures,
+                    cls.MAX_DOWNLOAD_ATTEMPTS,
+                    os.path.getsize(tmp_path) if os.path.exists(tmp_path) else 0,
                 )
-                time.sleep(cls.DOWNLOAD_RETRY_BACKOFF_SECONDS * attempt)
+                time.sleep(cls.DOWNLOAD_RETRY_BACKOFF_SECONDS * consecutive_failures)
                 continue
 
-            actual_size = os.path.getsize(tmp_path)
-            if actual_size != expected_size:
-                logger.warning(
-                    "downloaded size %d for %s does not match expected size %d",
-                    actual_size,
-                    file_url,
-                    expected_size,
-                )
-                if attempt == cls.MAX_DOWNLOAD_ATTEMPTS:
-                    raise ValueError(
-                        f"downloaded size {actual_size} for {file_url} does not "
-                        f"match expected size {expected_size} after "
-                        f"{cls.MAX_DOWNLOAD_ATTEMPTS} attempts"
-                    )
-                continue
+            consecutive_failures = 0
 
-            actual_checksum = cls._compute_md5(tmp_path)
-            if actual_checksum != expected_checksum:
-                logger.warning(
-                    "checksum mismatch for %s (got %s, expected %s), discarding "
-                    "downloaded data and retrying",
-                    file_url,
-                    actual_checksum,
-                    expected_checksum,
-                )
-                os.remove(tmp_path)
-                if attempt == cls.MAX_DOWNLOAD_ATTEMPTS:
-                    raise ValueError(
-                        f"checksum mismatch for {file_url} after "
-                        f"{cls.MAX_DOWNLOAD_ATTEMPTS} attempts"
-                    )
-                continue
+        actual_size = os.path.getsize(tmp_path)
+        if actual_size != expected_size:
+            raise ValueError(
+                f"downloaded size {actual_size} for {file_url} does not match "
+                f"expected size {expected_size}"
+            )
 
-            os.rename(tmp_path, dest_path.path)
-            return
+        actual_checksum = cls._compute_md5(tmp_path)
+        if actual_checksum != expected_checksum:
+            os.remove(tmp_path)
+            raise ValueError(
+                f"checksum mismatch for {file_url} (got {actual_checksum}, "
+                f"expected {expected_checksum}); deleted corrupt download"
+            )
+
+        os.rename(tmp_path, dest_path.path)
 
     @classmethod
     def download_worldcereal_data(
