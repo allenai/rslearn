@@ -17,7 +17,6 @@ from rslearn.config import LayerType
 from rslearn.data_sources.local_files import LocalFiles, RasterItemSpec
 from rslearn.log_utils import get_logger
 from rslearn.utils.fsspec import get_upath_local, join_upath
-from rslearn.utils.retry_session import create_retry_session
 
 from .data_source import DataSourceContext, Item
 
@@ -75,10 +74,9 @@ class WorldCereal(LocalFiles):
     # Number of consecutive chunk failures to tolerate (with backoff) before
     # giving up entirely. Since each chunk is capped at RANGE_SIZE_BYTES, a
     # failure only costs progress on the current chunk, not the whole file. This
-    # is the *only* retry budget for a chunk request: the session used here is
-    # created with retries disabled (see create_retry_session(total_retries=0)
-    # in _download_to_local_path_with_resume) so that a persistent failure can't
-    # multiply into (adapter retries) x (this loop's retries) requests.
+    # is the *only* retry budget for a chunk request: requests.Session does not
+    # retry failed requests by default, so a persistent failure can't multiply
+    # into (adapter retries) x (this loop's retries) requests.
     MAX_DOWNLOAD_ATTEMPTS = 5
     DOWNLOAD_RETRY_BACKOFF_SECONDS = 5.0
 
@@ -468,7 +466,7 @@ class WorldCereal(LocalFiles):
             expected_size: the expected size of the file in bytes.
             expected_checksum: the expected MD5 checksum of the file.
         """
-        session = create_retry_session(total_retries=0)
+        session = requests.Session()
         tmp_path = local_path + ".partial"
         consecutive_failures = 0
 
