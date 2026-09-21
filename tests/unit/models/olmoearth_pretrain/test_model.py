@@ -1062,7 +1062,9 @@ class _StubBackbone(torch.nn.Module):
         return self.output
 
 
-def _register_model(output: dict, **kwargs: object) -> OlmoEarth:
+def _register_model(
+    output: dict, projected_register_dim: int | None = None
+) -> OlmoEarth:
     """Build a model whose backbone returns the given output."""
     model = OlmoEarth(
         checkpoint_path="tests/unit/models/olmoearth_pretrain/",
@@ -1070,7 +1072,7 @@ def _register_model(output: dict, **kwargs: object) -> OlmoEarth:
         patch_size=4,
         embedding_size=128,
         use_register_bottleneck_output=True,
-        **kwargs,
+        projected_register_dim=projected_register_dim,
     )
     model.model = _StubBackbone(output)
     return model
