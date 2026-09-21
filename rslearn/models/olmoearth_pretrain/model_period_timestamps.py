@@ -44,6 +44,7 @@ class OlmoEarthPeriodTimestamps(OlmoEarth):
         autocast_dtype: str | None = "bfloat16",
         token_pooling: bool = True,
         use_register_bottleneck_output: bool = False,
+        projected_register_dim: int | None = None,
         normalize: bool = False,
         normalize_std_multiplier: float | None = 2,
         compile_model: bool = False,
@@ -66,6 +67,9 @@ class OlmoEarthPeriodTimestamps(OlmoEarth):
             token_pooling: whether to pool tokens (BxCxHxW) or keep them (BxCxHxWxN).
             use_register_bottleneck_output: return the register bottleneck latents
                 instead of the encoder patch tokens.
+            projected_register_dim: read the detached low-dim student
+                (``projected_registers``) instead of the teacher registers, keeping its
+                first N dimensions. Requires use_register_bottleneck_output.
             normalize: normalize the inputs inside the forward pass.
             normalize_std_multiplier: std multiplier for normalization.
             compile_model: apply torch.compile to the selected sub-module.
@@ -84,6 +88,7 @@ class OlmoEarthPeriodTimestamps(OlmoEarth):
             autocast_dtype=autocast_dtype,
             token_pooling=token_pooling,
             use_register_bottleneck_output=use_register_bottleneck_output,
+            projected_register_dim=projected_register_dim,
             use_legacy_timestamps=False,
             normalize=normalize,
             normalize_std_multiplier=normalize_std_multiplier,

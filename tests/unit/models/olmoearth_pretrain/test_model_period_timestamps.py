@@ -308,3 +308,31 @@ def test_time_range_none_raises() -> None:
     )
     with pytest.raises(ValueError, match="time_range"):
         model._prepare_modality_inputs(context)
+
+
+def test_projected_register_dim_forwarded_to_base() -> None:
+    """The subclass passes projected_register_dim through to OlmoEarth."""
+    model = OlmoEarthPeriodTimestamps(
+        checkpoint_path="tests/unit/models/olmoearth_pretrain/",
+        random_initialization=True,
+        patch_size=4,
+        embedding_size=128,
+        period_duration=timedelta(days=30),
+        max_matches=4,
+        use_register_bottleneck_output=True,
+        projected_register_dim=8,
+    )
+    assert model.projected_register_dim == 8
+
+    # The base class validation also applies, which only happens if the argument
+    # actually reaches it.
+    with pytest.raises(ValueError, match="use_register_bottleneck_output"):
+        OlmoEarthPeriodTimestamps(
+            checkpoint_path="tests/unit/models/olmoearth_pretrain/",
+            random_initialization=True,
+            patch_size=4,
+            embedding_size=128,
+            period_duration=timedelta(days=30),
+            max_matches=4,
+            projected_register_dim=8,
+        )
