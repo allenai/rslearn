@@ -2,7 +2,6 @@
 
 import copy
 import json
-import os
 import warnings
 from contextlib import nullcontext
 from dataclasses import dataclass
@@ -118,10 +117,7 @@ class OlmoEarth(FeatureExtractor):
                 teacher is the default, so this is what selects the student. N is a
                 Matryoshka prefix: the student is trained so that ``[..., :N]`` is
                 itself a strong embedding, for each trained width. Requires
-                use_register_bottleneck_output. Falls back to the
-                OE_PROJECTED_REGISTER_DIM environment variable when unset, but prefer
-                setting it here: an env var does not appear in the model config, so a
-                stored artifact would not record which head produced it.
+                use_register_bottleneck_output.
             use_register_bottleneck_output: return the model's spatial register
                 bottleneck latents instead of the encoder patch tokens. The model must
                 have a register bottleneck (e.g. "regbtl" checkpoints); its register
@@ -219,9 +215,6 @@ class OlmoEarth(FeatureExtractor):
             self.model.apply_compile()
         self.token_pooling = token_pooling
         self.use_register_bottleneck_output = use_register_bottleneck_output
-        if projected_register_dim is None:
-            env_dim = os.environ.get("OE_PROJECTED_REGISTER_DIM")
-            projected_register_dim = int(env_dim) if env_dim else None
         if projected_register_dim is not None and not use_register_bottleneck_output:
             raise ValueError(
                 "projected_register_dim requires use_register_bottleneck_output=True "
