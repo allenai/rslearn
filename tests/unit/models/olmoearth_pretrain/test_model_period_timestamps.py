@@ -310,8 +310,8 @@ def test_time_range_none_raises() -> None:
         model._prepare_modality_inputs(context)
 
 
-def test_projected_register_dim_forwarded_to_base() -> None:
-    """The subclass passes projected_register_dim through to OlmoEarth."""
+def test_arguments_forwarded_to_base_class() -> None:
+    """The subclass re-declares every base argument, so check they get passed on."""
     model = OlmoEarthPeriodTimestamps(
         checkpoint_path="tests/unit/models/olmoearth_pretrain/",
         random_initialization=True,
@@ -319,20 +319,19 @@ def test_projected_register_dim_forwarded_to_base() -> None:
         embedding_size=128,
         period_duration=timedelta(days=30),
         max_matches=4,
+        token_pooling=False,
         use_register_bottleneck_output=True,
         projected_register_dim=8,
+        normalize=True,
+        normalize_std_multiplier=3,
+        autocast_dtype=None,
     )
-    assert model.projected_register_dim == 8
 
-    # The base class validation also applies, which only happens if the argument
-    # actually reaches it.
-    with pytest.raises(ValueError, match="use_register_bottleneck_output"):
-        OlmoEarthPeriodTimestamps(
-            checkpoint_path="tests/unit/models/olmoearth_pretrain/",
-            random_initialization=True,
-            patch_size=4,
-            embedding_size=128,
-            period_duration=timedelta(days=30),
-            max_matches=4,
-            projected_register_dim=8,
-        )
+    assert model.token_pooling is False
+    assert model.use_register_bottleneck_output is True
+    assert model.projected_register_dim == 8
+    assert model.normalize is True
+    assert model.normalizer.std_multiplier == 3
+    assert model.autocast_dtype is None
+    # The subclass always opts out of legacy timestamps.
+    assert model.use_legacy_timestamps is False
