@@ -179,4 +179,16 @@ nav:
               - foundation_models/OlmoEarth.md
               - foundation_models/SatlasPretrain.md
               - foundation_models/Tessera.md
+          - Model Components:
+              - models/SimpleTimeSeries.md
+              - models/Fpn.md
+              - models/PickFeatures.md
+              - models/Conv.md
+              - models/PoolingDecoder.md
+              - models/TokensToChannels.md
+              - models/BreakpointScan.md
+              - models/ClassificationHead.md
+              - models/RegressionHead.md
+              - models/PerPixelRegressionHead.md
+              - models/SegmentationHead.md
   - API Reference: reference/

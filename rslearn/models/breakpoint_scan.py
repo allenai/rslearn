@@ -42,6 +42,10 @@ class BreakpointScan(IntermediateComponent):
       after the most likely breakpoint and are suitable for decoding the source and
       destination classes of a transition.
     - BEFORE_AFTER: the channel concatenation of before and after (B x 2C x H x W).
+
+    We suggest using EVIDENCE if predicting whether a change occurred, BEFORE_AFTER if
+    predicting a category of change, and BEFORE or AFTER individually if predicting a
+    pre and post category about the conditions before and after the change.
     """
 
     def __init__(

@@ -14,7 +14,10 @@ class TemporalTransformer(IntermediateComponent):
     """Apply a per-spatial-patch transformer on the tokens at each patch.
 
     Given a BCHWN token feature map, apply a transformer independently at each (b, h, w)
-    location over the N tokens. Usually these are per-timestep tokens.
+    location over the N tokens. Usually these are per-timestep tokens. This component is
+    most useful if the underlying encoder does not perform any temporal reasoning, e.g.
+    if the per-timestep tokens are derived by concatenating the outputs of a
+    single-timestep model across timesteps in an image time series.
 
     The output has the same shape as the input.
     """
