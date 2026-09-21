@@ -5,8 +5,11 @@ from types import SimpleNamespace
 
 import pytest
 import torch
+import torch.nn.attention
+import torch.nn.functional as F
 from olmoearth_pretrain_minimal.olmoearth_pretrain_v1.nn.flexi_vit import TokensAndMasks
 from olmoearth_pretrain_minimal.olmoearth_pretrain_v1.utils.datatypes import MaskValue
+from torch.nn.attention import SDPBackend
 
 from rslearn.const import WGS84_PROJECTION
 from rslearn.models.attention_pooling import AttentionPool, SimpleAttentionPool
@@ -117,6 +120,60 @@ def test_compile_model_requires_apply_compile() -> None:
             selector=["encoder", "blocks"],
             compile_model=True,
         )
+
+
+def test_sdpa_backends(monkeypatch: pytest.MonkeyPatch) -> None:
+    """sdpa_backends should set the SDPA backend priority during forward."""
+    model = OlmoEarth(
+        checkpoint_path="tests/unit/models/olmoearth_pretrain/",
+        random_initialization=True,
+        patch_size=4,
+        embedding_size=128,
+        sdpa_backends=["cudnn", "flash", "efficient", "math"],
+    )
+
+    # Record the active SDPA priority order each time attention is called.
+    recorded: list[list[SDPBackend]] = []
+    original_sdpa = F.scaled_dot_product_attention
+
+    def recording_sdpa(*args, **kwargs):  # type: ignore[no-untyped-def]
+        recorded.append(
+            torch.nn.attention._cur_sdpa_kernel_backends(with_priority=True)
+        )
+        return original_sdpa(*args, **kwargs)
+
+    monkeypatch.setattr(F, "scaled_dot_product_attention", recording_sdpa)
+
+    T = 2
+    H = 4
+    W = 4
+    inputs = [
+        {
+            "sentinel2_l2a": RasterImage(
+                image=torch.zeros(
+                    (12, T, H, W), dtype=torch.float32, device=torch.device("cpu")
+                ),
+                timestamps=[
+                    (datetime(2025, x, 1), datetime(2025, x, 1))
+                    for x in range(1, T + 1)
+                ],
+            )
+        }
+    ]
+    feature_map = model(
+        ModelContext(inputs=inputs, metadatas=[_make_metadata((0, 0, H, W))])
+    )
+    assert feature_map.feature_maps[0].shape == (1, 128, 1, 1)
+
+    # Every attention call should have seen the requested backend priority order.
+    assert len(recorded) > 0
+    for priority in recorded:
+        assert priority[:4] == [
+            SDPBackend.CUDNN_ATTENTION,
+            SDPBackend.FLASH_ATTENTION,
+            SDPBackend.EFFICIENT_ATTENTION,
+            SDPBackend.MATH,
+        ]
 
 
 def test_forward_no_pooling() -> None:

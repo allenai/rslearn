@@ -3,7 +3,7 @@
 import copy
 import json
 import warnings
-from contextlib import nullcontext
+from contextlib import AbstractContextManager, nullcontext
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from typing import Any
@@ -23,6 +23,7 @@ from olmoearth_pretrain_minimal.olmoearth_pretrain_v1.utils.datatypes import (
     MaskedOlmoEarthSample,
     MaskValue,
 )
+from torch.nn.attention import SDPBackend, sdpa_kernel
 from upath import UPath
 
 from rslearn.log_utils import get_logger
@@ -46,6 +47,14 @@ AUTOCAST_DTYPE_MAP = {
     "bfloat16": torch.bfloat16,
     "float16": torch.float16,
     "float32": torch.float32,
+}
+
+# Names accepted by the sdpa_backends option, mapped to the PyTorch SDPA backends.
+SDPA_BACKEND_MAP = {
+    "cudnn": SDPBackend.CUDNN_ATTENTION,
+    "flash": SDPBackend.FLASH_ATTENTION,
+    "efficient": SDPBackend.EFFICIENT_ATTENTION,
+    "math": SDPBackend.MATH,
 }
 
 EMBEDDING_SIZES = {
@@ -85,6 +94,7 @@ class OlmoEarth(FeatureExtractor):
         normalize: bool = False,
         normalize_std_multiplier: float | None = 2,
         compile_model: bool = False,
+        sdpa_backends: list[str] | None = None,
     ):
         """Create a new OlmoEarth model.
 
@@ -149,6 +159,12 @@ class OlmoEarth(FeatureExtractor):
                 apply_compile method (e.g. the encoder's per-block compilation). Note
                 that each distinct input shape triggers a (one-time) recompilation, so
                 this is most useful for fixed-shape bulk inference.
+            sdpa_backends: optional priority-ordered list of scaled dot product
+                attention backends to use for the forward pass, from "cudnn", "flash",
+                "efficient", and "math". Set None (the default) to leave PyTorch's own
+                backend selection unchanged. For example, ["cudnn", "flash", "efficient",
+                "math"] prefers the cuDNN kernel (faster on H100) while falling back
+                to other backends where cuDNN is unsupported.
         """
         if use_legacy_timestamps:
             warnings.warn(
@@ -213,6 +229,13 @@ class OlmoEarth(FeatureExtractor):
                     "an apply_compile method"
                 )
             self.model.apply_compile()
+
+        self.sdpa_backends: list[SDPBackend] | None
+        if sdpa_backends is not None:
+            self.sdpa_backends = [SDPA_BACKEND_MAP[name] for name in sdpa_backends]
+        else:
+            self.sdpa_backends = None
+
         self.token_pooling = token_pooling
         self.use_register_bottleneck_output = use_register_bottleneck_output
         if projected_register_dim is not None and not use_register_bottleneck_output:
@@ -757,6 +780,15 @@ class OlmoEarth(FeatureExtractor):
                 device_type=device.type, dtype=self.autocast_dtype
             )
 
+        # Decide the attention kernel context based on self.sdpa_backends. The context
+        # manager restores the previous global SDPA flags on exit, so it only affects
+        # this model's forward pass.
+        sdpa_context: AbstractContextManager[Any]
+        if self.sdpa_backends is None:
+            sdpa_context = nullcontext()
+        else:
+            sdpa_context = sdpa_kernel(self.sdpa_backends, set_priority=True)
+
         # Check if we can bypass masks (fast_pass=True)
         missing_tokens = False
         for modality in present_modalities:
@@ -765,7 +797,7 @@ class OlmoEarth(FeatureExtractor):
                 missing_tokens = True
                 break
 
-        with torch_context:
+        with torch_context, sdpa_context:
             # Currently we assume the provided model always returns a TokensAndMasks object.
             model_output = self.model(
                 sample,
