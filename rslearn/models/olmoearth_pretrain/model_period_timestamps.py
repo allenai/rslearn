@@ -42,6 +42,11 @@ class OlmoEarthPeriodTimestamps(OlmoEarth):
         embedding_size: int | None = None,
         autocast_dtype: str | None = "bfloat16",
         token_pooling: bool = True,
+        use_register_bottleneck_output: bool = False,
+        normalize: bool = False,
+        normalize_std_multiplier: float | None = 2,
+        compile_model: bool = False,
+        sdpa_backends: list[str] | None = None,
     ):
         """Create a new OlmoEarthPeriodTimestamps model.
 
@@ -58,6 +63,13 @@ class OlmoEarthPeriodTimestamps(OlmoEarth):
             embedding_size: optional embedding size override.
             autocast_dtype: dtype for autocasting, or None to disable.
             token_pooling: whether to pool tokens (BxCxHxW) or keep them (BxCxHxWxN).
+            use_register_bottleneck_output: return the register bottleneck latents
+                instead of the encoder patch tokens.
+            normalize: normalize the inputs inside the forward pass.
+            normalize_std_multiplier: std multiplier for normalization.
+            compile_model: apply torch.compile to the selected sub-module.
+            sdpa_backends: priority-ordered list of scaled dot product attention
+                backends, or None to use PyTorch's default selection.
         """
         super().__init__(
             patch_size=patch_size,
@@ -70,7 +82,12 @@ class OlmoEarthPeriodTimestamps(OlmoEarth):
             embedding_size=embedding_size,
             autocast_dtype=autocast_dtype,
             token_pooling=token_pooling,
+            use_register_bottleneck_output=use_register_bottleneck_output,
             use_legacy_timestamps=False,
+            normalize=normalize,
+            normalize_std_multiplier=normalize_std_multiplier,
+            compile_model=compile_model,
+            sdpa_backends=sdpa_backends,
         )
         self.period_duration = period_duration
         self.max_matches = max_matches
