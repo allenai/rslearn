@@ -800,9 +800,8 @@ class OlmoEarth(FeatureExtractor):
                 registers = model_output["projected_registers"][
                     ..., : self.projected_register_dim
                 ]
-            # olmoearth_pretrain d3e0941 reshaped both register outputs from
-            # [B, n_h*n_w, D] to [B, n_h, n_w, D]. Accept either, so this works with
-            # checkpoints and package versions from both sides of that change.
+            # Register outputs are [B, n_h*n_w, D] or [B, n_h, n_w, D] depending on
+            # the package version, so accept either.
             if registers.ndim == 4:
                 features = rearrange(registers, "b h w d -> b d h w")
             else:
