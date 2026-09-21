@@ -1157,9 +1157,7 @@ def _stub_output(
             sentinel2_l2a=torch.zeros(1, 1, 1, 2, 1, 8)
         ),
         "registers": registers,
-        "PLACEHOLDER": None,
     }
-    del output["PLACEHOLDER"]
     if projected is not None:
         output["projected_registers"] = projected
     return output
