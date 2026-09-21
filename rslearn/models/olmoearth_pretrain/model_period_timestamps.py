@@ -24,8 +24,9 @@ class OlmoEarthPeriodTimestamps(OlmoEarth):
 
     This subclass assumes that all modalities are configured with the same
     period_duration and max_matches, with no time_offset/duration modifying the window
-    time range, and no fallback periods. Then, we align modalities by computing the
-    periods for each sample, and aligning images against those periods.
+    time range, and no fallback periods (so that the periods can be computed based on the
+    window time range + period_duration). Then, we align modalities by computing the
+    periods for each sample, and aligning images in each modality against those periods.
     """
 
     def __init__(
