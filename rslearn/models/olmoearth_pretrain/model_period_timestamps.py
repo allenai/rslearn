@@ -211,16 +211,15 @@ class OlmoEarthPeriodTimestamps(OlmoEarth):
                 period_idx = self._find_period_position(
                     actual_ts, periods, excluded=filled
                 )
-                if period_idx is not None and period_idx < max_timesteps:
-                    aligned[:, period_idx, :, :] = tensor[:, orig_idx, :, :]
-                    mask[period_idx, :, :, :] = MaskValue.ONLINE_ENCODER.value
-                    filled.add(period_idx)
-                else:
-                    logger.warning(
-                        "Image %d (timestamp %s) could not be assigned to a period.",
-                        orig_idx,
-                        actual_ts,
+
+                if period_idx is None:
+                    raise ValueError(
+                        f"image at index {orig_idx} (timestamp {actual_ts}) could not be assigned to a period"
                     )
+
+                aligned[:, period_idx, :, :] = tensor[:, orig_idx, :, :]
+                mask[period_idx, :, :, :] = MaskValue.ONLINE_ENCODER.value
+                filled.add(period_idx)
 
         return aligned, mask
 
@@ -265,6 +264,10 @@ class OlmoEarthPeriodTimestamps(OlmoEarth):
             periods = self._compute_periods(
                 metadata.time_range, self.period_duration, self.max_matches
             )
+            if len(periods) == 0:
+                raise ValueError(
+                    f"window {metadata.window_name} unexpectedly has zero periods"
+                )
             if len(periods) < self.max_matches:
                 logger.warning(
                     "Window %s/%s: time range fits %d periods but "
