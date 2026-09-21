@@ -814,8 +814,7 @@ class OlmoEarth(FeatureExtractor):
         if self.use_register_bottleneck_output:
             # Return the spatial register bottleneck latents instead of the encoder
             # patch tokens. The registers form an (n_h, n_w) grid; in dynamic-grid
-            # mode this matches the patch grid, and register_grid is set on the
-            # bottleneck during the forward pass.
+            # mode this matches the patch grid.
             if "registers" not in model_output:
                 raise ValueError(
                     "use_register_bottleneck_output=True but the model output has no "
@@ -832,13 +831,8 @@ class OlmoEarth(FeatureExtractor):
                 registers = model_output["projected_registers"][
                     ..., : self.projected_register_dim
                 ]
-            # Register outputs are [B, n_h*n_w, D] or [B, n_h, n_w, D] depending on
-            # the package version, so accept either.
-            if registers.ndim == 4:
-                features = rearrange(registers, "b h w d -> b d h w")
-            else:
-                n_h, n_w = self.model.register_bottleneck.register_grid
-                features = rearrange(registers, "b (h w) d -> b d h w", h=n_h, w=n_w)
+            # Register outputs are [B, n_h, n_w, D].
+            features = rearrange(registers, "b h w d -> b d h w")
             return FeatureMaps([features])
 
         # Apply temporal/modality pooling so we just have one feature per patch.

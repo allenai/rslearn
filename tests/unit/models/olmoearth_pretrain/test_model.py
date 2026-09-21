@@ -1110,10 +1110,9 @@ def test_compute_tokens_in_batch() -> None:
 class _StubBackbone(torch.nn.Module):
     """Inner model returning fixed outputs, to exercise the register branch alone."""
 
-    def __init__(self, output: dict, register_grid: tuple[int, int] = (2, 2)) -> None:
+    def __init__(self, output: dict) -> None:
         super().__init__()
         self.output = output
-        self.register_bottleneck = SimpleNamespace(register_grid=register_grid)
 
     def forward(self, *args: object, **kwargs: object) -> dict:
         return self.output
@@ -1166,28 +1165,28 @@ def _stub_output(
     return output
 
 
-def test_register_output_accepts_both_layouts() -> None:
-    """Flat and gridded register outputs yield identical feature maps."""
-    flat = torch.arange(2 * 2 * 16, dtype=torch.float32).reshape(1, 4, 16)
-    gridded = flat.reshape(1, 2, 2, 16)
+def test_register_output_is_transposed_to_feature_map() -> None:
+    """Gridded registers [B, n_h, n_w, D] become a BxCxHxW feature map."""
+    registers = torch.arange(2 * 2 * 16, dtype=torch.float32).reshape(1, 2, 2, 16)
 
-    from_flat = _register_model(_stub_output(flat))(_register_context())
-    from_gridded = _register_model(_stub_output(gridded))(_register_context())
+    features = _register_model(_stub_output(registers))(
+        _register_context()
+    ).feature_maps[0]
 
-    assert from_flat.feature_maps[0].shape == (1, 16, 2, 2)
-    torch.testing.assert_close(from_flat.feature_maps[0], from_gridded.feature_maps[0])
+    assert features.shape == (1, 16, 2, 2)
+    torch.testing.assert_close(features, registers.permute(0, 3, 1, 2))
 
 
 def test_projected_register_dim_selects_and_truncates_student() -> None:
     """The student head is used instead of the teacher, cut to the requested width."""
-    teacher = torch.zeros(1, 4, 16)
-    student = torch.arange(2 * 2 * 16, dtype=torch.float32).reshape(1, 4, 16)
+    teacher = torch.zeros(1, 2, 2, 16)
+    student = torch.arange(2 * 2 * 16, dtype=torch.float32).reshape(1, 2, 2, 16)
 
     model = _register_model(_stub_output(teacher, student), projected_register_dim=8)
     features = model(_register_context()).feature_maps[0]
 
     assert features.shape == (1, 8, 2, 2)
-    expected = student.reshape(1, 2, 2, 16)[..., :8].permute(0, 3, 1, 2)
+    expected = student[..., :8].permute(0, 3, 1, 2)
     torch.testing.assert_close(features, expected)
 
 
@@ -1206,7 +1205,7 @@ def test_projected_register_dim_requires_bottleneck() -> None:
 def test_projected_register_dim_without_student_head() -> None:
     """A checkpoint with no student head fails loudly rather than using the teacher."""
     model = _register_model(
-        _stub_output(torch.zeros(1, 4, 16)), projected_register_dim=8
+        _stub_output(torch.zeros(1, 2, 2, 16)), projected_register_dim=8
     )
     with pytest.raises(ValueError, match="projected_registers"):
         model(_register_context())
