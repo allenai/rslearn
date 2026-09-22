@@ -520,7 +520,8 @@ data:
 
 rslearn includes a variety of model components that can be composed together, including
 feature extractors like OlmoEarth, predictors like Faster R-CNN, and intermediate
-components.
+components. See [Built-In Components](#built-in-components) below for the list of
+available components.
 
 `SingleTaskModel` and `MultiTaskModel` provide a framework for composing feature
 extractors, intermediate components, and predictors. These are composed into one
@@ -582,6 +583,16 @@ components in rslearn output one of the following types, defined in
 
 - FeatureMaps: a list of multi-scale feature maps. Each feature map is a BCHW tensor,
   where the channel dimension contains the features (embeddings).
+- TokenFeatureMaps: like FeatureMaps, but each feature map is a BCHWN tensor with an
+  additional dimension of N unpooled tokens at each spatial location (e.g. one token
+  per timestep). It is produced by [OlmoEarth](foundation_models/OlmoEarth.md) with
+  `token_pooling: false`, and consumed by components like
+  [TokensToChannels](models/TokensToChannels.md) and
+  [BreakpointScan](models/BreakpointScan.md) that reduce the token dimension to
+  produce a FeatureMaps. It also has an optional `masks` field: a list of BHWN bool
+  tensors (one per feature map) where True marks a valid token and False marks a
+  padded or missing token (in case the number of tokens varies across pixels or
+  samples). When `masks` is None, all tokens are valid.
 - FeatureVector: a flat feature vector. It consists of a single BxC tensor.
 
 #### Feature Extractor (First Encoder Component)
@@ -644,7 +655,7 @@ class ModelContext:
   context_dict: dict[str, Any] = field(default_factory=lambda: {})
 ```
 
-#### Intermediate Components
+#### Intermediate Component (Middle Components)
 
 Intermediate components input and output arbitrary types. They can be used as elements
 of the encoder after the FeatureExtractor, or elements of the decoder(s) before the
@@ -714,283 +725,50 @@ class ModelOutput:
   metadata: dict[str, Any] = field(default_factory=lambda: {})
 ```
 
-## Feature Extractors
+### Built-In Components
 
-### Foundation Models
+The tables below list the built-in model components. Each component links to a
+detailed page with a description of its inputs and outputs, configuration options, and
+example usage.
 
-Several remote sensing foundation models are included in rslearn, and can be used as
-the first component in the encoder list (the feature extractor).
+#### Feature Extractors
 
-- [OlmoEarth](foundation_models/OlmoEarth.md)
-- [SatlasPretrain](foundation_models/SatlasPretrain.md)
+Feature extractors are used as the first component in the encoder list. Several remote
+sensing foundation models are included in rslearn.
 
-### SimpleTimeSeries
+| Component | Output | Description |
+|---|---|---|
+| [OlmoEarth](foundation_models/OlmoEarth.md) | FeatureMaps or TokenFeatureMaps | OlmoEarth foundation model for Sentinel-2, Sentinel-1, and Landsat time series |
+| [SatlasPretrain](foundation_models/SatlasPretrain.md) | FeatureMaps | SatlasPretrain Swin-based models for Sentinel-2, Sentinel-1, Landsat, and aerial imagery |
+| [Tessera](foundation_models/Tessera.md) | FeatureMaps | Tessera encoder for Sentinel-2 and Sentinel-1 time series |
+| [SimpleTimeSeries](models/SimpleTimeSeries.md) | FeatureMaps | Wraps a unitemporal feature extractor and pools its features over a time series |
 
-SimpleTimeSeries wraps a unitemporal feature extractor and applies it on a time series.
-It encodes each image in the time series individually using the unitemporal feature
-extractor, and then pools the features temporally via max pooling, mean pooling, a
-ConvRNN, 3D convolutions, or 1D convolutions.
+#### Intermediate Components
 
-Here is a summary, see `rslearn.models.simple_time_series` for all of the available
-options.
+Intermediate components can be used in the encoder after the feature extractor, or in
+the decoder(s) before the predictor.
 
-```yaml
-model:
-  class_path: rslearn.train.lightning_module.RslearnLightningModule
-  init_args:
-    model:
-      class_path: rslearn.models.multitask.MultiTaskModel
-      init_args:
-        encoder:
-          - class_path: rslearn.models.simple_time_series.SimpleTimeSeries
-            init_args:
-              encoder:
-                class_path: # ...
-                init_args:
-                  # ...
-              # One of "max" (default), "mean", "convrnn", "conv3d", or
-              # "conv1d".
-              op: "max"
-              # Number of layers for convrnn, conv3d, and conv1d ops.
-              num_layers: null
-              # A map from input dict keys to the number of bands per image.
-              # This is used to split up the time series back into the
-              # individual images.
-              image_keys:
-                sentinel2: 12
-                sentinel1: 2
-          - ...
-```
+| Component | Input -> Output | Description |
+|---|---|---|
+| [Fpn](models/Fpn.md) | FeatureMaps -> FeatureMaps | Feature Pyramid Network that produces a fixed number of channels at each scale |
+| [PickFeatures](models/PickFeatures.md) | FeatureMaps -> FeatureMaps | Selects a subset of the feature maps |
+| [Conv](models/Conv.md) | FeatureMaps -> FeatureMaps | Applies a 2D convolution to each feature map |
+| [PoolingDecoder](models/PoolingDecoder.md) | FeatureMaps -> FeatureVector | Pools the last feature map into a flat vector for classification or regression |
+| [TokensToChannels](models/TokensToChannels.md) | TokenFeatureMaps -> FeatureMaps | Projects each token and stacks the results as channels, e.g. one logit per timestep |
+| [BreakpointScan](models/BreakpointScan.md) | TokenFeatureMaps -> FeatureMaps | Learned changepoint scan over per-timestep tokens for change detection |
 
-The [main README](https://github.com/allenai/rslearn/blob/master/README.md) has an example of using SimpleTimeSeries with
-SatlasPretrain.
+#### Predictors
 
-## Intermediate Components
+Predictors are the final component in each decoder. They compute outputs compatible
+with the configured task, along with the loss.
 
-This section documents intermediate model components that can be used in the
-encoder/decoder between the FeatureExtractor and the Predictor.
+| Predictor | Task | Input |
+|---|---|---|
+| [ClassificationHead](models/ClassificationHead.md) | [ClassificationTask](#classificationtask) | FeatureVector of logits |
+| [RegressionHead](models/RegressionHead.md) | [RegressionTask](#regressiontask) | FeatureVector of predicted values |
+| [PerPixelRegressionHead](models/PerPixelRegressionHead.md) | [PerPixelRegressionTask](#perpixelregressiontask) | FeatureMaps with one map of per-pixel predicted values |
+| [SegmentationHead](models/SegmentationHead.md) | [SegmentationTask](#segmentationtask) | FeatureMaps with one map of per-pixel logits |
 
-### Feature Pyramid Network
-
-Fpn implements a Feature Pyramid Network (FPN). The FPN inputs a FeatureMaps. At each
-scale, it computes new features of a configurable depth based on all input features. So
-it is best used for maps that were computed sequentially, where earlier features don't
-have the context from later features, but comprehensive features at each resolution are
-desired.
-
-Here is a summary, see `rslearn.models.fpn` for all of the available options.
-
-```yaml
-        encoder:
-          - # ...
-          - class_path: rslearn.models.fpn.Fpn
-            init_args:
-              # in_channels lists the number of channels in each feature map
-              # from the previous component. In this example, there are two
-              # feature maps, the first with 128 channels and the second with
-              # 256 channels.
-              in_channels: [128, 256]
-              # The number of output channels. Since there are two feature maps
-              # in the input, the output will have two feature maps at the same
-              # resolutions, but with 128 channels.
-              out_channels: 128
-```
-
-It is most often used for object detection tasks in conjunction with Faster R-CNN or
-similar bounding box predictors. Here is an example:
-
-```yaml
-model:
-  class_path: rslearn.train.lightning_module.RslearnLightningModule
-  init_args:
-    model:
-      class_path: rslearn.models.multitask.SingleTaskModel
-      init_args:
-        encoder:
-          - class_path: rslearn.models.swin.Swin
-            init_args:
-              pretrained: true
-              input_channels: 3
-              # These are the typical feature maps used from Swin. They are at
-              # 1/4, 1/8, 1/16, and 1/32 of the input resolution.
-              output_layers: [1, 3, 5, 7]
-          - class_path: rslearn.models.fpn.Fpn
-            init_args:
-              in_channels: [128, 256, 512, 1024]
-              out_channels: 128
-        decoder:
-          # Since we have applied the FPN, the input to the Faster R-CNN has 128
-          # channels at each resolution.
-          - class_path: rslearn.models.faster_rcnn.FasterRCNN
-            init_args:
-              downsample_factors: [4, 8, 16, 32]
-              num_channels: 128
-              num_classes: 10
-              anchor_sizes: [[32], [64], [128], [256]]
-```
-
-### PickFeatures
-
-`PickFeatures` picks a subset of feature maps from a FeatureMaps to pass to the next
-component. It outputs the updated FeatureMaps list.
-
-Here is a summary, see `rslearn.models.pick_features` for all of the available
-options.
-
-```yaml
-        decoder:
-          - class_path: rslearn.models.pick_features.PickFeatures
-            init_args:
-              # The indexes of the input feature map list to select.
-              # In this example, we select only the first feature map.
-              indexes: [0]
-```
-
-### PoolingDecoder
-
-`PoolingDecoder` computes a FeatureVector from a FeatureMaps.
-
-It inputs a FeatureMaps, but only uses the last feature map. Then it applies a
-configurable number of convolutional layers before pooling, and a configurable number
-of fully connected layers after pooling.
-
-The output is a FeatureVector. Most intermediate components currently input a
-FeatureMaps, so the next component is typically a predictor (either
-`ClassificationHead` or `RegressionHead`).
-
-Here is a summary, see `rslearn.models.pooling_decoder` for all of the available
-options.
-
-```yaml
-        decoder:
-          - class_path: rslearn.models.pooling_decoder.PoolingDecoder
-            init_args:
-              # The number of channels in the input (specifically, the last
-              # feature map in the list).
-              in_channels: 1024
-              # The number of output channels. This is typically tied to the
-              # task, e.g. if there will be 8 classes then this should be 8.
-              out_channels: 8
-              # The number of extra convolutional layers to apply before
-              # pooling. The default is 0.
-              num_conv_layers: 0
-              # The number of fully connected layers to apply after pooling. The
-              # default is 0.
-              num_fc_layers: 0
-              # Number of hidden channels when using num_conv_layers /
-              # num_fc_layers.
-              conv_channels: 128
-              fc_channels: 512
-          # This is an example for using PoolingDecoder with a classification
-          # task.
-          - class_path: rslearn.train.tasks.classification.ClassificationHead
-```
-
-### Conv
-
-`Conv` implements a standard 2D convolutional layer.
-
-It inputs a FeatureMaps. If there are multiple input feature maps, the same weights are
-convolved with each feature map.
-
-```yaml
-        decoder:
-          - class_path: rslearn.models.conv.Conv
-            init_args:
-              # The number of input channels. If there are multiple feature
-              # maps, they can have different resolutions, but must all have the
-              # same number of channels.
-              in_channels: 128
-              # The number of output channels.
-              out_channels: 64
-              # The kernel size, stride, and padding. See torch.nn.Conv2d. The
-              # stride defaults to 1 and the padding defaults to "same", while
-              # kernel_size must be configured. "same" padding keeps the same
-              # resolution as the input. If stride is not 1, then padding must
-              # be set since "same" is only accepted when the stride is 1.
-              kernel_size: 3
-              stride: 1
-              padding: "same"
-              # The activation to use. It defaults to ReLU.
-              activation:
-                class_path: torch.nn.ReLU
-          # ...
-```
-
-## Predictors
-
-### ClassificationHead
-
-ClassificationHead computes cross entropy loss given the logits and targets. It does
-not take any arguments.
-
-It inputs a FeatureVector of logits, where the channel dimension size must match the
-number of classes. It outputs the class probabilities after applying softmax on those
-input logits. It also produces a loss dict with one key, "cls", containing the softmax
-cross entropy loss.
-
-### PerPixelRegressionHead
-
-PerPixelRegressionHead computes a per-pixel regression loss (MSE, L1, or Huber). It is
-configured like this:
-
-```yaml
-        decoder:
-          # ...
-          - class_path: rslearn.train.tasks.per_pixel_regression.PerPixelRegressionHead
-            init_args:
-              # The loss function to use: "mse" (default), "l1", or "huber".
-              loss_mode: "mse"
-              # Optional: delta for Huber loss (only used when
-              # loss_mode="huber").
-              huber_delta: 1.0
-              # Whether to apply a sigmoid activation on the output. This
-              # requires the targets to be between 0-1. Otherwise, the previous
-              # output is unmodified.
-              use_sigmoid: false
-```
-
-It inputs a FeatureMaps, which must contain a single feature map consisting of the
-predicted values at each pixel. If `use_sigmoid` is false, those should correspond to
-the scaled values (actual value multiplied by the scale factor configured in the task).
-
-It outputs the scaled values as a BHW tensor. It also produces a loss dict with one
-key, "regress", containing the configured regression loss.
-
-### RegressionHead
-
-RegressionHead computes a regression loss (MSE, L1, or Huber). It is configured like
-this:
-
-```yaml
-        decoder:
-          # ...
-          - class_path: rslearn.train.tasks.regression.RegressionHead
-            init_args:
-              # The loss function to use: "mse" (default), "l1", or "huber".
-              loss_mode: "mse"
-              # Optional: delta for Huber loss (only used when
-              # loss_mode="huber").
-              huber_delta: 1.0
-              # Whether to apply a sigmoid activation on the output. This
-              # requires the targets to be between 0-1. Otherwise, the previous
-              # output is unmodified.
-              use_sigmoid: false
-```
-
-It inputs a FeatureVector containing the predicted values for each example in the
-batch. If `use_sigmoid` is false, those should correspond to the scaled values (actual
-value multiplied by the scale factor configured in the task).
-
-It outputs the scaled values as a single-dimension tensor. It also produces a loss dict
-with one key, "regress", containing the configured regression loss.
-
-### SegmentationHead
-
-SegmentationHead computes cross entropy loss given the logits and targets. It does not
-take any arguments.
-
-It inputs a FeatureMaps, which must contain a single feature map of logits, with the
-channel dimension size matching the number of classes. It outputs the class
-probabilities after applying softmax on those input logits. It also produces a loss
-dict with one key, "cls", containing the softmax cross entropy loss.
+Object detection with [DetectionTask](#detectiontask) uses
+`rslearn.models.faster_rcnn.FasterRCNN` as the predictor; see the DetectionTask example
+above.

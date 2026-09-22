@@ -1,0 +1,160 @@
+"""Learned changepoint scan over the token (time) dimension of a TokenFeatureMaps."""
+
+from enum import StrEnum
+from typing import Any
+
+import torch
+import torch.nn.functional as F
+from einops import rearrange
+from torch import nn
+
+from rslearn.train.model_context import ModelContext
+
+from .component import FeatureMaps, IntermediateComponent, TokenFeatureMaps
+
+
+class BreakpointOutput(StrEnum):
+    """Which feature of the changepoint scan a BreakpointScan returns."""
+
+    # Per-split scorer features max-pooled over the splits (B x hidden x H x W).
+    EVIDENCE = "evidence"
+    # Split-attention-weighted mean of the tokens before the breakpoint (B x C x H x W).
+    BEFORE = "before"
+    # Split-attention-weighted mean of the tokens after the breakpoint (B x C x H x W).
+    AFTER = "after"
+    # Channel concatenation of BEFORE and AFTER (B x 2C x H x W).
+    BEFORE_AFTER = "before_after"
+
+
+class BreakpointScan(IntermediateComponent):
+    """Changepoint scan over the T chronological tokens at each spatial location.
+
+    The input is a BCHWT token feature map (one token per timestep). For every
+    candidate split t in [0, T-2], the mean of the tokens up to and including t (the
+    "before" aggregate A_t) and the mean of the tokens after t (the "after" aggregate
+    B_t) are compared via |B_t - A_t| by a shared 1x1 conv scorer. Depending on the
+    configured output, the component returns one of:
+
+    - EVIDENCE: the per-split hidden scorer features max-pooled over the splits
+      (B x hidden x H x W). A decoder on this feature can only express "change" as a
+      before-vs-after dissimilarity at some breakpoint.
+    - BEFORE / AFTER: the before and after aggregates weighted by a softmax over a
+      scalar per-split score (B x C x H x W). These represent the state before and
+      after the most likely breakpoint and are suitable for decoding the source and
+      destination classes of a transition.
+    - BEFORE_AFTER: the channel concatenation of before and after (B x 2C x H x W).
+
+    We suggest using EVIDENCE if predicting whether a change occurred, BEFORE_AFTER if
+    predicting a category of change, and BEFORE or AFTER individually if predicting a
+    pre and post category about the conditions before and after the change.
+
+    If the input TokenFeatureMaps has masks, invalid tokens are excluded from the
+    before/after means, and splits with no valid token on one side are excluded from
+    the evidence max-pooling and the split-attention softmax.
+    """
+
+    def __init__(
+        self, in_dim: int, output: BreakpointOutput, hidden: int = 256
+    ) -> None:
+        """Create a new BreakpointScan.
+
+        Args:
+            in_dim: the token embedding dimension C.
+            output: which feature of the scan to return.
+            hidden: the hidden width of the split scorer, which is also the channel
+                count of the evidence feature.
+        """
+        super().__init__()
+        self.in_dim = in_dim
+        # Accept the string value too (e.g. from tests or programmatic use).
+        self.output = BreakpointOutput(output)
+        self.hidden = hidden
+        # Scorer applied to |after - before| at every split.
+        self.split_proj = nn.Sequential(
+            nn.Conv2d(in_dim, hidden, kernel_size=1),
+            nn.ReLU(inplace=True),
+            nn.Conv2d(hidden, hidden, kernel_size=1),
+            nn.ReLU(inplace=True),
+        )
+        # Scalar per-split score for the split-attention over breakpoints.
+        self.split_score = nn.Conv2d(hidden, 1, kernel_size=1)
+
+    def forward(self, intermediates: Any, context: ModelContext) -> FeatureMaps:
+        """Apply the changepoint scan.
+
+        Args:
+            intermediates: the output from the previous component, which must be a
+                TokenFeatureMaps with a single BCHWT feature map.
+            context: the model context.
+
+        Returns:
+            a FeatureMaps with one BCHW map, the configured output of the scan.
+        """
+        if not isinstance(intermediates, TokenFeatureMaps):
+            raise ValueError("input to BreakpointScan must be a TokenFeatureMaps")
+        if len(intermediates.feature_maps) != 1:
+            raise ValueError(
+                "input to BreakpointScan must have one feature map, but got "
+                f"{len(intermediates.feature_maps)}"
+            )
+        feature = intermediates.feature_maps[0]
+        mask = intermediates.get_masks()[0]
+        B, C, H, W, T = feature.shape
+        if C != self.in_dim:
+            raise ValueError(f"BreakpointScan expected {self.in_dim} channels, got {C}")
+        if T < 2:
+            raise ValueError(f"BreakpointScan needs at least 2 tokens, got {T}")
+
+        S = T - 1
+        # Per-split counts of valid tokens before (inclusive) and after each split.
+        valid_split: torch.Tensor | None = None
+        if mask is not None:
+            valid = mask.to(feature.dtype).unsqueeze(1)  # (B, 1, H, W, T)
+            feature = feature * valid
+            cum_counts = valid.cumsum(dim=-1)  # (B, 1, H, W, T)
+            counts_before = cum_counts[..., :-1]  # (B, 1, H, W, S)
+            counts_after = cum_counts[..., -1:] - cum_counts[..., :-1]
+            # A split is only meaningful if both sides have at least one valid token.
+            valid_split = (counts_before > 0) & (counts_after > 0)  # (B, 1, H, W, S)
+            valid_split = rearrange(valid_split, "b 1 h w s -> b s h w")
+        else:
+            counts_before = torch.arange(
+                1, T, device=feature.device, dtype=feature.dtype
+            )
+            counts_after = T - counts_before
+
+        cums = feature.cumsum(dim=-1)  # (B, C, H, W, T)
+        total = cums[..., -1:]
+        # (B, C, H, W, S) mean of valid tokens in [0, t]
+        before = cums[..., :-1] / counts_before.clamp(min=1)
+        # mean of valid tokens in (t, T)
+        after = (total - cums[..., :-1]) / counts_after.clamp(min=1)
+        con = (after - before).abs()
+
+        # Scorer over all splits: fold S into the batch dimension.
+        con = rearrange(con, "b c h w s -> (b s) c h w")
+        hidden = self.split_proj(con)  # (B*S, hidden, H, W)
+        scores = self.split_score(hidden)  # (B*S, 1, H, W)
+        hidden = rearrange(hidden, "(b s) c h w -> b s c h w", b=B, s=S)
+        scores = rearrange(scores, "(b s) 1 h w -> b s h w", b=B, s=S)
+
+        if self.output == BreakpointOutput.EVIDENCE:
+            if valid_split is not None:
+                # hidden is post-ReLU so zero is the minimum; invalid splits then
+                # never win the max unless every split is invalid (all zeros).
+                hidden = hidden.masked_fill(~valid_split.unsqueeze(2), 0.0)
+            return FeatureMaps([hidden.max(dim=1).values])  # (B, hidden, H, W)
+
+        if valid_split is not None:
+            # Invalid splits get (near) zero attention weight. If every split at a
+            # location is invalid, the weights degrade to uniform rather than NaN.
+            scores = scores.masked_fill(~valid_split, torch.finfo(scores.dtype).min)
+        w = F.softmax(scores, dim=1)  # (B, S, H, W)
+        w = rearrange(w, "b s h w -> b 1 h w s")
+        if self.output == BreakpointOutput.BEFORE:
+            return FeatureMaps([(before * w).sum(dim=-1)])  # (B, C, H, W)
+        if self.output == BreakpointOutput.AFTER:
+            return FeatureMaps([(after * w).sum(dim=-1)])
+        before_agg = (before * w).sum(dim=-1)
+        after_agg = (after * w).sum(dim=-1)
+        return FeatureMaps([torch.cat([before_agg, after_agg], dim=1)])  # (B, 2C, H, W)

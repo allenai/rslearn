@@ -8,7 +8,7 @@ import torch
 
 from rslearn.train.model_context import RasterImage
 
-from .transform import Transform, read_selector, write_selector
+from .transform import Transform, read_selector, selector_exists, write_selector
 
 
 class ConcatenateDim(Enum):
@@ -26,6 +26,7 @@ class Concatenate(Transform):
         selections: dict[str, list[int]],
         output_selector: str,
         concatenate_dim: ConcatenateDim | int = ConcatenateDim.TIME,
+        skip_missing: bool = False,
     ):
         """Initialize a new Concatenate.
 
@@ -34,8 +35,11 @@ class Concatenate(Transform):
                 retain, or empty list to use all bands.
             output_selector: the output selector under which to save the concatenate image.
             concatenate_dim: the dimension against which to concatenate the inputs
+            skip_missing: if True, selectors that are absent from the input/target dicts
+                are silently skipped instead of raising. Useful when concatenating
+                optional inputs (e.g. per-month layers where some months are missing).
         """
-        super().__init__()
+        super().__init__(skip_missing=skip_missing)
         self.selections = selections
         self.output_selector = output_selector
         self.concatenate_dim = (
@@ -57,19 +61,46 @@ class Concatenate(Transform):
             (input_dicts, target_dicts) where the entry corresponding to
             output_selector contains the concatenated RasterImage.
         """
+        concatenate_time = self.concatenate_dim == ConcatenateDim.TIME.value
+
         tensors: list[torch.Tensor] = []
-        timestamps: list[tuple[datetime, datetime]] | None = None
+        # For CHANNEL concatenation, all inputs share the same timesteps, so we keep the
+        # first available timestamps. For TIME concatenation, timestamps are collected
+        # across all inputs so that len(timestamps) matches the concatenated time
+        # dimension (required by models that consume real per-timestep timestamps).
+        channel_timestamps: list[tuple[datetime, datetime]] | None = None
+        time_timestamps: list[tuple[datetime, datetime]] = []
+        time_has_all_timestamps = True
 
         for selector, wanted_bands in self.selections.items():
+            if self.skip_missing and not selector_exists(
+                input_dict, target_dict, selector
+            ):
+                continue
             image = read_selector(input_dict, target_dict, selector)
             if wanted_bands:
                 tensors.append(image.image[wanted_bands, :, :])
             else:
                 tensors.append(image.image)
-            if timestamps is None and image.timestamps is not None:
-                # assume all concatenated modalities have the same
-                # number of timestamps
-                timestamps = image.timestamps
+
+            if concatenate_time:
+                if image.timestamps is not None:
+                    time_timestamps.extend(image.timestamps)
+                else:
+                    time_has_all_timestamps = False
+            elif channel_timestamps is None and image.timestamps is not None:
+                channel_timestamps = image.timestamps
+
+        if not tensors:
+            raise ValueError(
+                f"Concatenate produced no inputs for output_selector "
+                f"'{self.output_selector}' (all selectors missing with skip_missing)."
+            )
+
+        if concatenate_time:
+            timestamps = time_timestamps if time_has_all_timestamps else None
+        else:
+            timestamps = channel_timestamps
 
         result = RasterImage(
             torch.concatenate(tensors, dim=self.concatenate_dim),
