@@ -1,8 +1,6 @@
 """Data source for ESA WorldCover 2021."""
 
-import functools
 import hashlib
-import json
 import os
 import shutil
 import tempfile
@@ -18,7 +16,7 @@ from rslearn.data_sources.local_files import LocalFiles, RasterItemSpec
 from rslearn.log_utils import get_logger
 from rslearn.utils.fsspec import get_upath_local, join_upath
 
-from .data_source import DataSourceContext, Item
+from .data_source import DataSourceContext
 
 logger = get_logger(__name__)
 
@@ -635,26 +633,9 @@ class WorldCereal(LocalFiles):
 
         return tif_dir, tif_filepath
 
-    @functools.cache
-    def list_items(self) -> list[Item]:
-        """Lists items from the source directory while maintaining a cache file.
+    def get_cache_fname(self) -> UPath:
+        """Returns the file where the item list is cached.
 
-        This is identical to LocalFiles.list_items except that a unique summary
-        is made per band (since we treat each band separately now.)
+        A unique summary is made per band (since we treat each band separately now.)
         """
-        cache_fname = self.src_dir / f"{self.band}_summary.json"
-        if not cache_fname.exists():
-            logger.debug("cache at %s does not exist, listing items", cache_fname)
-            items = self.importer.list_items(self.src_dir)
-            serialized_items = [item.serialize() for item in items]
-            with cache_fname.open("w") as f:
-                json.dump(serialized_items, f)
-            return items
-
-        logger.debug("loading item list from cache at %s", cache_fname)
-        with cache_fname.open() as f:
-            serialized_items = json.load(f)
-        return [
-            self.deserialize_item(serialized_item)
-            for serialized_item in serialized_items
-        ]
+        return self.src_dir / f"{self.band}_summary.json"

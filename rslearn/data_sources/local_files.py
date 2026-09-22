@@ -21,7 +21,9 @@ from rslearn.utils.feature import Feature
 from rslearn.utils.fsspec import (
     get_relative_suffix,
     get_upath_local,
+    is_tmp_path,
     join_upath,
+    open_atomic,
     open_rasterio_upath_reader,
 )
 from rslearn.utils.geometry import Projection, STGeometry
@@ -36,6 +38,22 @@ ItemType = TypeVar("ItemType", bound=Item)
 ImporterType = TypeVar("ImporterType", bound="Importer")
 
 SOURCE_NAME = "rslearn.data_sources.local_files.LocalFiles"
+
+
+def _should_skip_source_file(path: UPath) -> bool:
+    """Whether a file in the source directory should be ignored when listing items.
+
+    We skip JSON files, which include the item list cache, along with the temporary
+    file that caching the item list writes before renaming it into place, since
+    another process may be listing this directory while we write it.
+
+    Args:
+        path: the file in the source directory.
+
+    Returns:
+        true if the file is not a data file that an item can be created from.
+    """
+    return path.name.endswith(".json") or is_tmp_path(path)
 
 
 class Importer(Generic[ItemType]):
@@ -198,14 +216,7 @@ class RasterImporter(Importer):
             item_specs = []
             file_paths = src_dir.glob("**/*.*")
             for path in file_paths:
-                # Ignore JSON files.
-                if path.name.endswith(".json"):
-                    continue
-
-                # Ignore temporary files that may be created by open_atomic.
-                # The suffix should be like "X.tif.tmp.1234".
-                parts = path.name.split(".")
-                if len(parts) >= 4 and parts[-2] == "tmp" and parts[-1].isdigit():
+                if _should_skip_source_file(path):
                     continue
 
                 spec = RasterItemSpec(
@@ -314,8 +325,7 @@ class VectorImporter(Importer):
         items: list[Item] = []
 
         for path in file_paths:
-            # Ignore JSON files.
-            if path.name.endswith(".json"):
+            if _should_skip_source_file(path):
                 continue
 
             # Get the bounds of the features in the vector file, which we assume fiona can
@@ -454,25 +464,56 @@ class LocalFiles(DataSource):
         else:
             raise ValueError(f"unknown layer type {self.layer_type}")
 
+    def get_cache_fname(self) -> UPath:
+        """Returns the file where the item list is cached."""
+        return self.src_dir / "summary.json"
+
+    def _read_cached_items(self, cache_fname: UPath) -> list[dict] | None:
+        """Read the serialized item list from the cache file.
+
+        Args:
+            cache_fname: the file where the item list is cached.
+
+        Returns:
+            the serialized items, or None if the cache is missing or unusable and the
+            items must be listed again. The cache can be unusable if it was truncated
+            by an interrupted write, or if a concurrent writer is filling it in on a
+            filesystem where the write is not atomic.
+        """
+        try:
+            with cache_fname.open() as f:
+                return json.load(f)
+        except FileNotFoundError:
+            logger.debug("cache at %s does not exist, listing items", cache_fname)
+            return None
+        except json.JSONDecodeError:
+            logger.warning(
+                "cache at %s is incomplete or corrupt, listing items instead",
+                cache_fname,
+            )
+            return None
+
     @functools.cache
     def list_items(self) -> list[Item]:
         """Lists items from the source directory while maintaining a cache file."""
-        cache_fname = self.src_dir / "summary.json"
-        if not cache_fname.exists():
-            logger.debug("cache at %s does not exist, listing items", cache_fname)
-            items = self.importer.list_items(self.src_dir)
-            serialized_items = [item.serialize() for item in items]
-            with cache_fname.open("w") as f:
-                json.dump(serialized_items, f)
-            return items
+        cache_fname = self.get_cache_fname()
 
         logger.debug("loading item list from cache at %s", cache_fname)
-        with cache_fname.open() as f:
-            serialized_items = json.load(f)
-        return [
-            self.deserialize_item(serialized_item)
-            for serialized_item in serialized_items
-        ]
+        serialized_items = self._read_cached_items(cache_fname)
+        if serialized_items is not None:
+            return [
+                self.deserialize_item(serialized_item)
+                for serialized_item in serialized_items
+            ]
+
+        items = self.importer.list_items(self.src_dir)
+        serialized_items = [item.serialize() for item in items]
+        # Write the cache atomically. Several workers may be preparing windows against
+        # the same source directory at once, and a reader must never see a cache file
+        # that another worker has created but not finished writing.
+        with open_atomic(cache_fname, "w") as f:
+            json.dump(serialized_items, f)
+        return items
 
     @functools.cache
     def _get_spatial_index(self) -> GridIndex:

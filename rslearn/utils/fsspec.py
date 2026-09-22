@@ -1,6 +1,7 @@
 """Utilities related to fsspec and upath libraries."""
 
 import os
+import re
 import tempfile
 from collections.abc import Generator, Iterator
 from contextlib import contextmanager
@@ -14,6 +15,40 @@ from upath import UPath
 from rslearn.log_utils import get_logger
 
 logger = get_logger(__name__)
+
+# Temporary files written on the way to an atomic rename are named after their
+# destination plus the writing process ID, e.g. "image.tif.tmp.1234".
+TMP_PATH_SUFFIX_RE = re.compile(r"\.tmp\.\d+$")
+
+
+def get_tmp_path(path: UPath) -> str:
+    """Returns the temporary path to write to before renaming to the given path.
+
+    Including the process ID keeps concurrent writers of the same destination from
+    clobbering each other's partial writes.
+
+    Args:
+        path: the destination path.
+
+    Returns:
+        the path to write to first.
+    """
+    return f"{path.path}.tmp.{os.getpid()}"
+
+
+def is_tmp_path(path: UPath) -> bool:
+    """Whether the path is a temporary file left by an atomic write.
+
+    The write may still be in progress, so callers listing a directory should ignore
+    these files rather than treating them as data.
+
+    Args:
+        path: the path to check.
+
+    Returns:
+        true if the path is a temporary file written by :func:`get_tmp_path`.
+    """
+    return TMP_PATH_SUFFIX_RE.search(path.name) is not None
 
 
 def iter_nonhidden(path: UPath) -> Iterator[UPath]:
@@ -142,7 +177,7 @@ def open_atomic(path: UPath, *args: Any, **kwargs: Any) -> Generator[Any, None, 
     """
     if isinstance(path.fs, LocalFileSystem):
         logger.debug("open_atomic: writing atomically to local file at %s", path)
-        tmppath = path.path + ".tmp." + str(os.getpid())
+        tmppath = get_tmp_path(path)
         with open(tmppath, *args, **kwargs) as file:
             yield file
         os.rename(tmppath, path.path)
@@ -200,7 +235,7 @@ def open_rasterio_upath_writer(
             "open_rasterio_upath_writer: writing atomically to local rasterio dataset at %s",
             path,
         )
-        tmppath = path.path + ".tmp." + str(os.getpid())
+        tmppath = get_tmp_path(path)
         with rasterio.open(tmppath, "w", **kwargs) as raster:
             yield raster
         os.rename(tmppath, path.path)
