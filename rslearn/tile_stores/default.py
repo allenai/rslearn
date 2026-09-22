@@ -18,6 +18,7 @@ from upath import UPath
 from rslearn.const import WGS84_PROJECTION
 from rslearn.utils.feature import Feature
 from rslearn.utils.fsspec import (
+    is_tmp_path,
     iter_nonhidden_files,
     iter_nonhidden_subdirs,
     join_upath,
@@ -148,7 +149,7 @@ class DefaultTileStore(TileStore):
                 continue
             if fname.name == METADATA_FNAME:
                 continue
-            if ".tmp." in fname.name:
+            if is_tmp_path(fname):
                 continue
             return fname
         raise ValueError(f"no raster found in {raster_dir}")
