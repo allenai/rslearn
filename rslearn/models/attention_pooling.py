@@ -16,6 +16,16 @@ from rslearn.models.component import (
 from rslearn.train.model_context import ModelContext
 
 
+def _get_flat_masks(
+    intermediates: TokenFeatureMaps,
+) -> list[torch.Tensor | None]:
+    """Get one optional (b h w) n bool mask per feature map."""
+    return [
+        rearrange(mask, "b h w n -> (b h w) n") if mask is not None else None
+        for mask in intermediates.get_masks()
+    ]
+
+
 class SimpleAttentionPool(IntermediateComponent):
     """Simple Attention Pooling.
 
@@ -27,6 +37,9 @@ class SimpleAttentionPool(IntermediateComponent):
     which should be assigned to each token during averaging:
 
     output = sum [feat_token * W(feat_token) for feat_token in feat_tokens]
+
+    If the input TokenFeatureMaps has masks, invalid tokens receive zero attention
+    weight.
     """
 
     def __init__(self, in_dim: int, hidden_linear: bool = False) -> None:
@@ -45,13 +58,27 @@ class SimpleAttentionPool(IntermediateComponent):
             self.hidden_linear = None
         self.linear = nn.Linear(in_features=in_dim, out_features=1)
 
-    def forward_for_map(self, feat_tokens: torch.Tensor) -> torch.Tensor:
-        """Attention pooling for a single feature map (BCHWN tensor)."""
+    def forward_for_map(
+        self, feat_tokens: torch.Tensor, mask: torch.Tensor | None = None
+    ) -> torch.Tensor:
+        """Attention pooling for a single feature map (BCHWN tensor).
+
+        Args:
+            feat_tokens: the BCHWN token feature map.
+            mask: optional (B*H*W) x N bool mask of valid tokens. Invalid tokens get
+                zero attention weight. If every token at a location is invalid, the
+                weights degrade to uniform.
+        """
         B, D, H, W, N = feat_tokens.shape
         feat_tokens = rearrange(feat_tokens, "b d h w n -> (b h w) n d")
         if self.hidden_linear is not None:
             feat_tokens = torch.nn.functional.relu(self.hidden_linear(feat_tokens))
-        attention_scores = torch.nn.functional.softmax(self.linear(feat_tokens), dim=1)
+        logits = self.linear(feat_tokens)  # (B*H*W, N, 1)
+        if mask is not None:
+            logits = logits.masked_fill(
+                ~mask.unsqueeze(-1), torch.finfo(logits.dtype).min
+            )
+        attention_scores = torch.nn.functional.softmax(logits, dim=1)
         feat_tokens = (attention_scores * feat_tokens).sum(dim=1)
         return rearrange(feat_tokens, "(b h w) d -> b d h w", b=B, h=H, w=W)
 
@@ -72,8 +99,10 @@ class SimpleAttentionPool(IntermediateComponent):
             raise ValueError("input to Attention Pool must be a TokenFeatureMaps")
 
         features = []
-        for feat in intermediates.feature_maps:
-            features.append(self.forward_for_map(feat))
+        for feat, mask in zip(
+            intermediates.feature_maps, _get_flat_masks(intermediates)
+        ):
+            features.append(self.forward_for_map(feat, mask))
         return FeatureMaps(features)
 
 
@@ -86,6 +115,9 @@ class AttentionPool(IntermediateComponent):
 
     We do this by learning a query token, and applying a standard
     attention mechanism against this learned query token.
+
+    If the input TokenFeatureMaps has masks, invalid tokens receive zero attention
+    weight.
     """
 
     def __init__(self, in_dim: int, num_heads: int, linear_on_kv: bool = True) -> None:
@@ -116,8 +148,17 @@ class AttentionPool(IntermediateComponent):
         """Initialize weights for the probe."""
         nn.init.trunc_normal_(self.query_token, std=0.02)
 
-    def forward_for_map(self, feat_tokens: torch.Tensor) -> torch.Tensor:
-        """Attention pooling for a single feature map (BCHWN tensor)."""
+    def forward_for_map(
+        self, feat_tokens: torch.Tensor, mask: torch.Tensor | None = None
+    ) -> torch.Tensor:
+        """Attention pooling for a single feature map (BCHWN tensor).
+
+        Args:
+            feat_tokens: the BCHWN token feature map.
+            mask: optional (B*H*W) x N bool mask of valid tokens. Invalid tokens get
+                zero attention weight. If every token at a location is invalid, the
+                weights degrade to uniform.
+        """
         B, D, H, W, N = feat_tokens.shape
         feat_tokens = rearrange(feat_tokens, "b d h w n -> (b h w) n d")
         collapsed_dim = B * H * W
@@ -147,7 +188,11 @@ class AttentionPool(IntermediateComponent):
         # Compute attention scores
         attn_scores = torch.matmul(q, k.transpose(-2, -1)) / math.sqrt(
             D // self.num_heads
-        )
+        )  # [B*H*W, num_heads, 1, N]
+        if mask is not None:
+            attn_scores = attn_scores.masked_fill(
+                ~mask[:, None, None, :], torch.finfo(attn_scores.dtype).min
+            )
         attn_weights = F.softmax(attn_scores, dim=-1)
         x = torch.matmul(attn_weights, v)  # [B*H*W, num_heads, 1, D_head]
         x = x.squeeze(-2)  # [B*H*W, num_heads, D_head]
@@ -173,6 +218,8 @@ class AttentionPool(IntermediateComponent):
             raise ValueError("input to Attention Pool must be a TokenFeatureMaps")
 
         features = []
-        for feat in intermediates.feature_maps:
-            features.append(self.forward_for_map(feat))
+        for feat, mask in zip(
+            intermediates.feature_maps, _get_flat_masks(intermediates)
+        ):
+            features.append(self.forward_for_map(feat, mask))
         return FeatureMaps(features)

@@ -214,8 +214,67 @@ def test_forward_no_pooling() -> None:
     # 6 = 3 band sets * 2 timesteps
     assert features.shape == (1, 128, 1, 1, 6)
 
+    # With no missing timesteps, the mask should be present and all True.
+    assert feature_map.masks is not None
+    assert len(feature_map.masks) == 1
+    mask = feature_map.masks[0]
+    assert mask.shape == (1, 1, 1, 6)
+    assert mask.dtype == torch.bool
+    assert mask.all()
+
     # Backbone channels should match patch size and depth.
     assert model.get_backbone_channels() == [(4, 128)]
+
+
+def test_forward_no_pooling_variable_timesteps() -> None:
+    """With token_pooling=False, padded timesteps are marked invalid in the mask."""
+    model = OlmoEarth(
+        checkpoint_path="tests/unit/models/olmoearth_pretrain/",
+        random_initialization=True,
+        patch_size=4,
+        embedding_size=128,
+        token_pooling=False,
+        autocast_dtype=None,
+        use_legacy_timestamps=False,
+    )
+
+    H = 4
+    W = 4
+    num_timesteps = [3, 2]
+    inputs = [
+        {
+            "sentinel2_l2a": RasterImage(
+                image=torch.zeros((12, t, H, W), dtype=torch.float32),
+                timestamps=[
+                    (datetime(2025, x, 1), datetime(2025, x, 1))
+                    for x in range(1, t + 1)
+                ],
+            )
+        }
+        for t in num_timesteps
+    ]
+    feature_map = model(
+        ModelContext(
+            inputs=inputs,
+            metadatas=[_make_metadata((0, 0, H, W)) for _ in num_timesteps],
+        )
+    )
+
+    num_band_sets = 3
+    max_timesteps = max(num_timesteps)
+    n = num_band_sets * max_timesteps
+    features = feature_map.feature_maps[0]
+    assert features.shape == (2, 128, 1, 1, n)
+    assert feature_map.masks is not None
+    mask = feature_map.masks[0]
+    assert mask.shape == (2, 1, 1, n)
+    assert mask.dtype == torch.bool
+
+    # Tokens are ordered by timestep then band set, so each timestep occupies a
+    # contiguous block of num_band_sets tokens.
+    for batch_idx, t in enumerate(num_timesteps):
+        assert mask[batch_idx, ..., : t * num_band_sets].all()
+        assert not mask[batch_idx, ..., t * num_band_sets :].any()
 
 
 def test_with_attnpool() -> None:

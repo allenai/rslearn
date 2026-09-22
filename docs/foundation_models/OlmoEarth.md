@@ -41,11 +41,19 @@ model:
               # - OLMOEARTH_V1_TINY
               # - OLMOEARTH_V1_BASE
               # - OLMOEARTH_V1_LARGE
+              # - OLMOEARTH_V1_2_NANO
+              # - OLMOEARTH_V1_2_TINY
+              # - OLMOEARTH_V1_2_SMALL
+              # - OLMOEARTH_V1_2_BASE
               model_id: OLMOEARTH_V1_BASE
               # The patch size should be set between 1 and 8, depending on the
               # size of the features being predicted, and the available compute
               # (lower patch sizes are slower).
               patch_size: 4
+              # Whether to pool the tokens over timesteps, band sets, and
+              # modalities. If false, the output is a TokenFeatureMaps instead of
+              # a FeatureMaps (see below). Defaults to true.
+              token_pooling: true
 ```
 
 The output is a single feature map, with a resolution equal to `1/patch_size` of the
@@ -55,6 +63,31 @@ input resolution. The embedding size depends on the `model_id`:
 - OLMOEARTH_V1_TINY: 192
 - OLMOEARTH_V1_BASE: 768
 - OLMOEARTH_V1_LARGE: 1024
+- OLMOEARTH_V1_2_NANO: 128
+- OLMOEARTH_V1_2_TINY: 192
+- OLMOEARTH_V1_2_SMALL: 384
+- OLMOEARTH_V1_2_BASE: 768
+
+### Per-Timestep Tokens
+
+By default, OlmoEarth averages the tokens over timesteps, band sets, and modalities so
+that it outputs a single BxCxHxW feature map (a FeatureMaps). With
+`token_pooling: false`, it instead outputs a TokenFeatureMaps with a single BxCxHxWxN
+feature map, where the N tokens at each spatial location are the unpooled encoder
+tokens, ordered by modality, then timestep, then band set.
+
+The v1 models tokenize Sentinel-2 into three band sets and Landsat into two, so N is
+the number of timesteps times the number of band sets, summed over the input
+modalities. The v1.2 models use a single band set per modality, so when a single
+modality is passed, N is exactly the number of timesteps and the tokens are in
+chronological order. This makes v1.2 models suitable for components that operate on
+per-timestep tokens, like [TokensToChannels](../models/TokensToChannels.md) and
+[BreakpointScan](../models/BreakpointScan.md).
+
+The TokenFeatureMaps also includes a BxHxWxN bool mask marking which tokens are valid.
+Within a batch, N is the maximum number of tokens across samples; if a sample has
+fewer timesteps (or is missing a modality), its extra token slots are padded and
+marked False in the mask.
 
 ## Fine-tuning Optimizer
 

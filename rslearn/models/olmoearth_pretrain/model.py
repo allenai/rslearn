@@ -757,6 +757,8 @@ class OlmoEarth(FeatureExtractor):
         Returns:
             a FeatureMaps consisting of one feature map, at 1/patch_size of the input
                 resolution. Embeddings will be pooled across modalities and timesteps.
+                If token_pooling is False, a TokenFeatureMaps is returned instead with
+                one BCHWN feature map of unpooled tokens.
         """
         if self.normalize:
             # Normalize each sample's inputs in place before assembling the modality
@@ -863,6 +865,7 @@ class OlmoEarth(FeatureExtractor):
             pooled = torch.stack(features, dim=0).mean(dim=0)
             return FeatureMaps([pooled])
         else:
+            masks = []
             for modality in present_modalities:
                 modality_features = getattr(tokens_and_masks, modality)
                 # Combine band sets and timesteps into last dim (BHWTSC -> BHWCN).
@@ -870,8 +873,17 @@ class OlmoEarth(FeatureExtractor):
                     modality_features, "b h w t s c -> b c h w (t s)"
                 )
                 features.append(modality_features)
-            pooled = torch.cat(features, dim=-1)
-            return TokenFeatureMaps([pooled])
+                # Build the matching BHWN bool mask indicating which tokens are
+                # valid (not padded/missing), so downstream components can handle
+                # variable numbers of timesteps per sample.
+                modality_valid = (
+                    getattr(tokens_and_masks, f"{modality}_mask")
+                    != MaskValue.MISSING.value
+                )  # BHWTS
+                masks.append(rearrange(modality_valid, "b h w t s -> b h w (t s)"))
+            tokens = torch.cat(features, dim=-1)
+            mask = torch.cat(masks, dim=-1)
+            return TokenFeatureMaps([tokens], masks=[mask])
 
     def get_backbone_channels(self) -> list:
         """Returns the output channels of this model when used as a backbone.

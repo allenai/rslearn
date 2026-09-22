@@ -252,8 +252,9 @@ run_name: ${RUN_NAME}
 management_dir: ${MANAGEMENT_DIR}
 ```
 
-See [TasksAndModels](../TasksAndModels.md) for more details about the SimpleTimeSeries
-and OlmoEarth model components.
+See [SimpleTimeSeries](../models/SimpleTimeSeries.md) and
+[OlmoEarth](../foundation_models/OlmoEarth.md) for more details about these model
+components.
 
 Save this as `model.yaml`.
 
