@@ -121,13 +121,6 @@ class OlmoEarth(FeatureExtractor):
             token_pooling: whether or not to pool the tokens. If True, the output will be BxCxHxW. If False,
                 there will be an extra dimension, N, (BxCxHxWxN) representing the temporal and channel
                 dimensions.
-            projected_register_dim: read the detached low-dim student
-                (``projected_registers``) instead of the teacher registers, keeping its
-                first N dimensions. Distilled checkpoints emit both heads, and the
-                teacher is the default, so this is what selects the student. N is a
-                Matryoshka prefix: the student is trained so that ``[..., :N]`` is
-                itself a strong embedding, for each trained width. Requires
-                use_register_bottleneck_output.
             use_register_bottleneck_output: return the model's spatial register
                 bottleneck latents instead of the encoder patch tokens. The model must
                 have a register bottleneck (e.g. "regbtl" checkpoints); its register
@@ -135,6 +128,13 @@ class OlmoEarth(FeatureExtractor):
                 encoder width) are returned as a single BxCxHxW feature map. Note that
                 this is unrelated to the classic ViT register tokens
                 (num_register_tokens).
+            projected_register_dim: read the detached low-dim student
+                (``projected_registers``) instead of the teacher registers, keeping its
+                first N dimensions. Distilled checkpoints emit both heads, and the
+                teacher is the default, so this is what selects the student. N is a
+                Matryoshka prefix: the student is trained so that ``[..., :N]`` is
+                itself a strong embedding, for each trained width. Requires
+                use_register_bottleneck_output.
             use_legacy_timestamps: set timestamps to dummy values [1 January 2024, 1 February 2024, ...]
                 instead of the actual timestamps of the input. The option to do this is preserved
                 for backwards compatability with finetuned models which were trained against this
