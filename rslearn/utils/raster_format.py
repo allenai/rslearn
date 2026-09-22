@@ -870,10 +870,24 @@ class NumpyRasterFormat(RasterFormat):
 
     ``decode_raster`` does not support re-projection, only cropping/padding; if the
     requested Projection does not match the Projection under which the image data was
-    stored, an exception will be raised.
+    stored, an exception will be raised. When ``read_full_array`` is enabled
+    (automatically for band sets with ``spatial_size``), the stored array is
+    returned unchanged instead; spatial read arguments are ignored.
     """
 
     data_fname = "data.npy"
+
+    def __init__(self, read_full_array: bool = False) -> None:
+        """Configure whether reads return the full native array.
+
+        Args:
+            read_full_array: Ignore requested projection/bounds and return the
+                stored CTHW array unchanged. BandSetConfig enables this for
+                NumPy band sets with spatial_size, such as single-cell weather
+                histories. Otherwise, normal projection checks and crop/pad
+                behavior apply. This setting does not affect writes.
+        """
+        self.read_full_array = read_full_array
 
     def encode_raster(
         self,
@@ -917,7 +931,9 @@ class NumpyRasterFormat(RasterFormat):
 
         Projection must match the stored projection. If the requested bounds
         differ from the stored bounds the array is cropped/padded accordingly
-        (out-of-bounds pixels are filled with the nodata value, or 0).
+        (out-of-bounds pixels are filled with the nodata value, or 0). With
+        read_full_array enabled, spatial read arguments are ignored and the
+        array and timestamps are returned as stored.
 
         Args:
             path: directory to read from.
@@ -934,15 +950,16 @@ class NumpyRasterFormat(RasterFormat):
         with (path / self.data_fname).open("rb") as f:
             array = np.load(f)
 
-        array = _check_projection_and_crop_bounds(
-            array=array,
-            stored_projection=metadata.projection,
-            stored_bounds=metadata.bounds,
-            requested_projection=projection,
-            requested_bounds=bounds,
-            nodata_value=metadata.nodata_value,
-            format_name="NumpyRasterFormat",
-        )
+        if not self.read_full_array:
+            array = _check_projection_and_crop_bounds(
+                array=array,
+                stored_projection=metadata.projection,
+                stored_bounds=metadata.bounds,
+                requested_projection=projection,
+                requested_bounds=bounds,
+                nodata_value=metadata.nodata_value,
+                format_name="NumpyRasterFormat",
+            )
 
         return RasterArray(
             array=array,

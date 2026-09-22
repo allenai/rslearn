@@ -28,7 +28,7 @@ from upath import UPath
 from rslearn.log_utils import get_logger
 from rslearn.utils.array import unique_nodata_value
 from rslearn.utils.geometry import PixelBounds, Projection, ResolutionFactor
-from rslearn.utils.raster_format import RasterFormat
+from rslearn.utils.raster_format import NumpyRasterFormat, RasterFormat
 from rslearn.utils.vector_format import VectorFormat
 
 if TYPE_CHECKING:
@@ -201,7 +201,9 @@ class BandSetConfig(BaseModel):
     # only 1 pixel covers a typical window.
     spatial_size: tuple[int, int] | None = Field(
         default=None,
-        description="Optional (height, width) output size. Mutually exclusive with non-zero zoom_offset.",
+        description="Optional (height, width) output size. Mutually exclusive with non-zero zoom_offset. "
+        "NumPy band sets with spatial_size are read as complete stored arrays, "
+        "independently of the requested spatial crop.",
     )
 
     # Cached instantiated RasterFormat. We cache since it can take a few ms to
@@ -347,6 +349,13 @@ class BandSetConfig(BaseModel):
         parser.add_argument("--raster_format", type=RasterFormat)
         cfg = parser.parse_object({"raster_format": self.format})
         self._raster_format = parser.instantiate_classes(cfg).raster_format
+        if self.spatial_size is not None and isinstance(
+            self._raster_format, NumpyRasterFormat
+        ):
+            # Fixed-size NumPy grids (e.g. 1x1 ERA5 time series) describe the
+            # whole window. Read them unchanged, including when training requests
+            # a finer-resolution crop for another input such as labels.
+            self._raster_format.read_full_array = True
         return self._raster_format
 
 
