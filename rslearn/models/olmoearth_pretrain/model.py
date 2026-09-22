@@ -881,9 +881,9 @@ class OlmoEarth(FeatureExtractor):
                     != MaskValue.MISSING.value
                 )  # BHWTS
                 masks.append(rearrange(modality_valid, "b h w t s -> b h w (t s)"))
-            pooled = torch.cat(features, dim=-1)
+            tokens = torch.cat(features, dim=-1)
             mask = torch.cat(masks, dim=-1)
-            return TokenFeatureMaps([pooled], masks=[mask])
+            return TokenFeatureMaps([tokens], masks=[mask])
 
     def get_backbone_channels(self) -> list:
         """Returns the output channels of this model when used as a backbone.
