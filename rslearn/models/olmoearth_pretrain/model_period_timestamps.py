@@ -24,8 +24,9 @@ class OlmoEarthPeriodTimestamps(OlmoEarth):
 
     This subclass assumes that all modalities are configured with the same
     period_duration and max_matches, with no time_offset/duration modifying the window
-    time range, and no fallback periods. Then, we align modalities by computing the
-    periods for each sample, and aligning images against those periods.
+    time range, and no fallback periods (so that the periods can be computed based on the
+    window time range + period_duration). Then, we align modalities by computing the
+    periods for each sample, and aligning images in each modality against those periods.
     """
 
     def __init__(
@@ -42,6 +43,12 @@ class OlmoEarthPeriodTimestamps(OlmoEarth):
         embedding_size: int | None = None,
         autocast_dtype: str | None = "bfloat16",
         token_pooling: bool = True,
+        use_register_bottleneck_output: bool = False,
+        projected_register_dim: int | None = None,
+        normalize: bool = False,
+        normalize_std_multiplier: float | None = 2,
+        compile_model: bool = False,
+        sdpa_backends: list[str] | None = None,
     ):
         """Create a new OlmoEarthPeriodTimestamps model.
 
@@ -58,6 +65,16 @@ class OlmoEarthPeriodTimestamps(OlmoEarth):
             embedding_size: optional embedding size override.
             autocast_dtype: dtype for autocasting, or None to disable.
             token_pooling: whether to pool tokens (BxCxHxW) or keep them (BxCxHxWxN).
+            use_register_bottleneck_output: return the register bottleneck latents
+                instead of the encoder patch tokens.
+            projected_register_dim: read the detached low-dim student
+                (``projected_registers``) instead of the teacher registers, keeping its
+                first N dimensions. Requires use_register_bottleneck_output.
+            normalize: normalize the inputs inside the forward pass.
+            normalize_std_multiplier: std multiplier for normalization.
+            compile_model: apply torch.compile to the selected sub-module.
+            sdpa_backends: priority-ordered list of scaled dot product attention
+                backends, or None to use PyTorch's default selection.
         """
         super().__init__(
             patch_size=patch_size,
@@ -70,7 +87,13 @@ class OlmoEarthPeriodTimestamps(OlmoEarth):
             embedding_size=embedding_size,
             autocast_dtype=autocast_dtype,
             token_pooling=token_pooling,
+            use_register_bottleneck_output=use_register_bottleneck_output,
+            projected_register_dim=projected_register_dim,
             use_legacy_timestamps=False,
+            normalize=normalize,
+            normalize_std_multiplier=normalize_std_multiplier,
+            compile_model=compile_model,
+            sdpa_backends=sdpa_backends,
         )
         self.period_duration = period_duration
         self.max_matches = max_matches
@@ -194,16 +217,15 @@ class OlmoEarthPeriodTimestamps(OlmoEarth):
                 period_idx = self._find_period_position(
                     actual_ts, periods, excluded=filled
                 )
-                if period_idx is not None and period_idx < max_timesteps:
-                    aligned[:, period_idx, :, :] = tensor[:, orig_idx, :, :]
-                    mask[period_idx, :, :, :] = MaskValue.ONLINE_ENCODER.value
-                    filled.add(period_idx)
-                else:
-                    logger.warning(
-                        "Image %d (timestamp %s) could not be assigned to a period.",
-                        orig_idx,
-                        actual_ts,
+
+                if period_idx is None:
+                    raise ValueError(
+                        f"image at index {orig_idx} (timestamp {actual_ts}) could not be assigned to a period"
                     )
+
+                aligned[:, period_idx, :, :] = tensor[:, orig_idx, :, :]
+                mask[period_idx, :, :, :] = MaskValue.ONLINE_ENCODER.value
+                filled.add(period_idx)
 
         return aligned, mask
 
@@ -248,6 +270,10 @@ class OlmoEarthPeriodTimestamps(OlmoEarth):
             periods = self._compute_periods(
                 metadata.time_range, self.period_duration, self.max_matches
             )
+            if len(periods) == 0:
+                raise ValueError(
+                    f"window {metadata.window_name} unexpectedly has zero periods"
+                )
             if len(periods) < self.max_matches:
                 logger.warning(
                     "Window %s/%s: time range fits %d periods but "

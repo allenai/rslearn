@@ -195,9 +195,55 @@ def test_max_matches_truncates_periods() -> None:
     model = _make_model(period_duration=timedelta(days=30), max_matches=2)
 
     H, W = 4, 4
-    # 4 periods possible, but max_matches=2 keeps only the last 2
+    # 4 periods possible, but max_matches=2 keeps only the last 2. The dataset would
+    # then only materialize images for those 2 periods (Mar and Apr), so that is what
+    # we provide here.
     time_range = (datetime(2025, 1, 1), datetime(2025, 5, 1))
-    # Images in all 4 months, but only the 2 most recent periods are used.
+    timestamps = [
+        (datetime(2025, 3, 15), datetime(2025, 3, 15)),
+        (datetime(2025, 4, 15), datetime(2025, 4, 15)),
+    ]
+    # Fill each timestep with a distinct value so we can check which image lands in
+    # which period slot.
+    image = torch.zeros((12, 2, H, W), dtype=torch.float32)
+    image[:, 0] = 3  # March
+    image[:, 1] = 4  # April
+    inputs = [
+        {
+            "sentinel2_l2a": RasterImage(image=image, timestamps=timestamps),
+        }
+    ]
+    context = ModelContext(
+        inputs=inputs,
+        metadatas=[_make_metadata((0, 0, H, W), time_range=time_range)],
+    )
+    sample, _, _ = model._prepare_modality_inputs(context)
+
+    # Only 2 period slots
+    mask = sample.sentinel2_l2a_mask
+    assert mask.shape[3] == 2
+    # Both most-recent period slots should be filled.
+    assert (mask[0, :, :, 0, :] == MaskValue.ONLINE_ENCODER.value).all()
+    assert (mask[0, :, :, 1, :] == MaskValue.ONLINE_ENCODER.value).all()
+    # And the March image should be in slot 0 and the April image in slot 1.
+    tokens = sample.sentinel2_l2a  # (B, H, W, T, C)
+    assert (tokens[0, :, :, 0, :] == 3).all()
+    assert (tokens[0, :, :, 1, :] == 4).all()
+
+    # Timestamps should be period midpoints for the 2 most recent periods
+    assert sample.timestamps.shape == (1, 2, 3)
+    # Periods are (Mar 2 - Apr 1) and (Apr 1 - May 1); months are 0-indexed.
+    assert sample.timestamps[0, 0, 1].item() == 2  # March
+    assert sample.timestamps[0, 1, 1].item() == 3  # April
+
+
+def test_more_images_than_periods_raises() -> None:
+    """A modality with more images than period slots indicates a misconfiguration."""
+    model = _make_model(period_duration=timedelta(days=30), max_matches=2)
+
+    H, W = 4, 4
+    time_range = (datetime(2025, 1, 1), datetime(2025, 5, 1))
+    # 4 images but only 2 periods, so 2 of the images cannot be assigned.
     timestamps = [
         (datetime(2025, 1, 15), datetime(2025, 1, 15)),
         (datetime(2025, 2, 15), datetime(2025, 2, 15)),
@@ -216,17 +262,31 @@ def test_max_matches_truncates_periods() -> None:
         inputs=inputs,
         metadatas=[_make_metadata((0, 0, H, W), time_range=time_range)],
     )
-    sample, _, _ = model._prepare_modality_inputs(context)
+    with pytest.raises(ValueError, match="could not be assigned to a period"):
+        model._prepare_modality_inputs(context)
 
-    # Only 2 period slots
-    mask = sample.sentinel2_l2a_mask
-    assert mask.shape[3] == 2
-    # Both most-recent period slots should be filled (Mar and Apr images match)
-    assert (mask[0, :, :, 0, :] == MaskValue.ONLINE_ENCODER.value).all()
-    assert (mask[0, :, :, 1, :] == MaskValue.ONLINE_ENCODER.value).all()
 
-    # Timestamps should be period midpoints for the 2 most recent periods
-    assert sample.timestamps.shape == (1, 2, 3)
+def test_zero_periods_raises() -> None:
+    """A window time range shorter than period_duration yields no periods."""
+    model = _make_model(period_duration=timedelta(days=30), max_matches=2)
+
+    H, W = 4, 4
+    # 10-day window is shorter than the 30-day period_duration.
+    time_range = (datetime(2025, 1, 1), datetime(2025, 1, 11))
+    inputs = [
+        {
+            "sentinel2_l2a": RasterImage(
+                image=torch.ones((12, 1, H, W), dtype=torch.float32),
+                timestamps=[(datetime(2025, 1, 5), datetime(2025, 1, 5))],
+            ),
+        }
+    ]
+    context = ModelContext(
+        inputs=inputs,
+        metadatas=[_make_metadata((0, 0, H, W), time_range=time_range)],
+    )
+    with pytest.raises(ValueError, match="zero periods"):
+        model._prepare_modality_inputs(context)
 
 
 def test_time_range_none_raises() -> None:
@@ -248,3 +308,30 @@ def test_time_range_none_raises() -> None:
     )
     with pytest.raises(ValueError, match="time_range"):
         model._prepare_modality_inputs(context)
+
+
+def test_arguments_forwarded_to_base_class() -> None:
+    """The subclass re-declares every base argument, so check they get passed on."""
+    model = OlmoEarthPeriodTimestamps(
+        checkpoint_path="tests/unit/models/olmoearth_pretrain/",
+        random_initialization=True,
+        patch_size=4,
+        embedding_size=128,
+        period_duration=timedelta(days=30),
+        max_matches=4,
+        token_pooling=False,
+        use_register_bottleneck_output=True,
+        projected_register_dim=8,
+        normalize=True,
+        normalize_std_multiplier=3,
+        autocast_dtype=None,
+    )
+
+    assert model.token_pooling is False
+    assert model.use_register_bottleneck_output is True
+    assert model.projected_register_dim == 8
+    assert model.normalize is True
+    assert model.normalizer.std_multiplier == 3
+    assert model.autocast_dtype is None
+    # The subclass always opts out of legacy timestamps.
+    assert model.use_legacy_timestamps is False

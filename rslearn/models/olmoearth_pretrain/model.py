@@ -3,7 +3,7 @@
 import copy
 import json
 import warnings
-from contextlib import nullcontext
+from contextlib import AbstractContextManager, nullcontext
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from typing import Any
@@ -23,6 +23,7 @@ from olmoearth_pretrain_minimal.olmoearth_pretrain_v1.utils.datatypes import (
     MaskedOlmoEarthSample,
     MaskValue,
 )
+from torch.nn.attention import SDPBackend, sdpa_kernel
 from upath import UPath
 
 from rslearn.log_utils import get_logger
@@ -46,6 +47,14 @@ AUTOCAST_DTYPE_MAP = {
     "bfloat16": torch.bfloat16,
     "float16": torch.float16,
     "float32": torch.float32,
+}
+
+# Names accepted by the sdpa_backends option, mapped to the PyTorch SDPA backends.
+SDPA_BACKEND_MAP = {
+    "cudnn": SDPBackend.CUDNN_ATTENTION,
+    "flash": SDPBackend.FLASH_ATTENTION,
+    "efficient": SDPBackend.EFFICIENT_ATTENTION,
+    "math": SDPBackend.MATH,
 }
 
 EMBEDDING_SIZES = {
@@ -79,11 +88,13 @@ class OlmoEarth(FeatureExtractor):
         autocast_dtype: str | None = "bfloat16",
         token_pooling: bool = True,
         use_register_bottleneck_output: bool = False,
+        projected_register_dim: int | None = None,
         use_legacy_timestamps: bool = True,
         timestamp_error_tolerance: timedelta = timedelta(days=15),
         normalize: bool = False,
         normalize_std_multiplier: float | None = 2,
         compile_model: bool = False,
+        sdpa_backends: list[str] | None = None,
     ):
         """Create a new OlmoEarth model.
 
@@ -117,6 +128,13 @@ class OlmoEarth(FeatureExtractor):
                 encoder width) are returned as a single BxCxHxW feature map. Note that
                 this is unrelated to the classic ViT register tokens
                 (num_register_tokens).
+            projected_register_dim: read the detached low-dim student
+                (``projected_registers``) instead of the teacher registers, keeping its
+                first N dimensions. Distilled checkpoints emit both heads, and the
+                teacher is the default, so this is what selects the student. N is a
+                Matryoshka prefix: the student is trained so that ``[..., :N]`` is
+                itself a strong embedding, for each trained width. Requires
+                use_register_bottleneck_output.
             use_legacy_timestamps: set timestamps to dummy values [1 January 2024, 1 February 2024, ...]
                 instead of the actual timestamps of the input. The option to do this is preserved
                 for backwards compatability with finetuned models which were trained against this
@@ -141,6 +159,12 @@ class OlmoEarth(FeatureExtractor):
                 apply_compile method (e.g. the encoder's per-block compilation). Note
                 that each distinct input shape triggers a (one-time) recompilation, so
                 this is most useful for fixed-shape bulk inference.
+            sdpa_backends: optional priority-ordered list of scaled dot product
+                attention backends to use for the forward pass, from "cudnn", "flash",
+                "efficient", and "math". Set None (the default) to leave PyTorch's own
+                backend selection unchanged. For example, ["cudnn", "flash", "efficient",
+                "math"] prefers the cuDNN kernel (faster on H100) while falling back
+                to other backends where cuDNN is unsupported.
         """
         if use_legacy_timestamps:
             warnings.warn(
@@ -205,8 +229,21 @@ class OlmoEarth(FeatureExtractor):
                     "an apply_compile method"
                 )
             self.model.apply_compile()
+
+        self.sdpa_backends: list[SDPBackend] | None
+        if sdpa_backends is not None:
+            self.sdpa_backends = [SDPA_BACKEND_MAP[name] for name in sdpa_backends]
+        else:
+            self.sdpa_backends = None
+
         self.token_pooling = token_pooling
         self.use_register_bottleneck_output = use_register_bottleneck_output
+        if projected_register_dim is not None and not use_register_bottleneck_output:
+            raise ValueError(
+                "projected_register_dim requires use_register_bottleneck_output=True "
+                "(the student only exists under the register bottleneck)"
+            )
+        self.projected_register_dim = projected_register_dim
         self.use_legacy_timestamps = use_legacy_timestamps
         self.timestamp_error_tolerance = timestamp_error_tolerance
 
@@ -743,6 +780,15 @@ class OlmoEarth(FeatureExtractor):
                 device_type=device.type, dtype=self.autocast_dtype
             )
 
+        # Decide the attention kernel context based on self.sdpa_backends. The context
+        # manager restores the previous global SDPA flags on exit, so it only affects
+        # this model's forward pass.
+        sdpa_context: AbstractContextManager[Any]
+        if self.sdpa_backends is None:
+            sdpa_context = nullcontext()
+        else:
+            sdpa_context = sdpa_kernel(self.sdpa_backends, set_priority=True)
+
         # Check if we can bypass masks (fast_pass=True)
         missing_tokens = False
         for modality in present_modalities:
@@ -751,7 +797,7 @@ class OlmoEarth(FeatureExtractor):
                 missing_tokens = True
                 break
 
-        with torch_context:
+        with torch_context, sdpa_context:
             # Currently we assume the provided model always returns a TokensAndMasks object.
             model_output = self.model(
                 sample,
@@ -768,16 +814,25 @@ class OlmoEarth(FeatureExtractor):
         if self.use_register_bottleneck_output:
             # Return the spatial register bottleneck latents instead of the encoder
             # patch tokens. The registers form an (n_h, n_w) grid; in dynamic-grid
-            # mode this matches the patch grid, and register_grid is set on the
-            # bottleneck during the forward pass.
+            # mode this matches the patch grid.
             if "registers" not in model_output:
                 raise ValueError(
                     "use_register_bottleneck_output=True but the model output has no "
                     "'registers' key; the loaded model must have a register bottleneck"
                 )
-            registers = model_output["registers"]  # [B, n_h*n_w, D]
-            n_h, n_w = self.model.register_bottleneck.register_grid
-            features = rearrange(registers, "b (h w) d -> b d h w", h=n_h, w=n_w)
+            registers = model_output["registers"]
+            if self.projected_register_dim is not None:
+                if "projected_registers" not in model_output:
+                    raise ValueError(
+                        "projected_register_dim is set but the model output has no "
+                        "'projected_registers'; this checkpoint has no detached "
+                        "register student"
+                    )
+                registers = model_output["projected_registers"][
+                    ..., : self.projected_register_dim
+                ]
+            # Register outputs are [B, n_h, n_w, D].
+            features = rearrange(registers, "b h w d -> b d h w")
             return FeatureMaps([features])
 
         # Apply temporal/modality pooling so we just have one feature per patch.
