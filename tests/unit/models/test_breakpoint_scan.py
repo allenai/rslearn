@@ -75,3 +75,62 @@ def test_constant_series_has_no_evidence() -> None:
     assert torch.allclose(evidence(tokens, CONTEXT).feature_maps[0], expected, **TOL)
     # The before aggregate of a constant series is the constant.
     assert torch.allclose(before(tokens, CONTEXT).feature_maps[0], x[..., 0], **TOL)
+
+
+@pytest.mark.parametrize(
+    "output",
+    [
+        BreakpointOutput.EVIDENCE,
+        BreakpointOutput.BEFORE,
+        BreakpointOutput.AFTER,
+        BreakpointOutput.BEFORE_AFTER,
+    ],
+)
+def test_mask_matches_truncated_series(output: BreakpointOutput) -> None:
+    """Masking trailing tokens gives the same result as truncating the series."""
+    model = BreakpointScan(in_dim=DIM, output=output, hidden=HIDDEN)
+    T = 6
+    num_valid = 4
+    x = torch.randn(1, DIM, 2, 2, T)
+    mask = torch.ones(1, 2, 2, T, dtype=torch.bool)
+    mask[..., num_valid:] = False
+
+    masked = model(TokenFeatureMaps([x], masks=[mask]), CONTEXT).feature_maps[0]
+    truncated = model(TokenFeatureMaps([x[..., :num_valid]]), CONTEXT).feature_maps[0]
+    assert torch.allclose(masked, truncated, **TOL)
+
+    # Perturbing the masked tokens does not change the output.
+    x2 = x.clone()
+    x2[..., num_valid:] += 100.0
+    masked2 = model(TokenFeatureMaps([x2], masks=[mask]), CONTEXT).feature_maps[0]
+    assert torch.allclose(masked, masked2, **TOL)
+
+
+def test_mask_per_sample_lengths() -> None:
+    """Samples in a batch may have different numbers of valid tokens."""
+    model = BreakpointScan(in_dim=DIM, output=BreakpointOutput.BEFORE, hidden=HIDDEN)
+    T = 5
+    x = torch.randn(2, DIM, 1, 1, T)
+    mask = torch.ones(2, 1, 1, T, dtype=torch.bool)
+    mask[1, ..., 2:] = False
+
+    out = model(TokenFeatureMaps([x], masks=[mask]), CONTEXT).feature_maps[0]
+    # Sample 0 is fully valid and equals the unmasked result.
+    full = model(TokenFeatureMaps([x[:1]]), CONTEXT).feature_maps[0]
+    assert torch.allclose(out[:1], full, **TOL)
+    # Sample 1 has T=2 valid tokens so there is a single valid split, and the
+    # before aggregate is exactly the first token.
+    assert torch.allclose(out[1], x[1, ..., 0], **TOL)
+
+
+@pytest.mark.parametrize("output", list(BreakpointOutput))
+def test_all_masked_location_no_nan(output: BreakpointOutput) -> None:
+    """Locations with fewer than two valid tokens still give finite outputs."""
+    model = BreakpointScan(in_dim=DIM, output=output, hidden=HIDDEN)
+    x = torch.randn(1, DIM, 1, 2, 4)
+    mask = torch.ones(1, 1, 2, 4, dtype=torch.bool)
+    # First location: no valid tokens. Second location: one valid token.
+    mask[:, 0, 0, :] = False
+    mask[:, 0, 1, 1:] = False
+    out = model(TokenFeatureMaps([x], masks=[mask]), CONTEXT).feature_maps[0]
+    assert torch.isfinite(out).all()

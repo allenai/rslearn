@@ -5,6 +5,7 @@ from typing import Any
 
 import torch
 import torch.nn.functional as F
+from einops import rearrange
 from torch import nn
 
 from rslearn.train.model_context import ModelContext
@@ -46,6 +47,10 @@ class BreakpointScan(IntermediateComponent):
     We suggest using EVIDENCE if predicting whether a change occurred, BEFORE_AFTER if
     predicting a category of change, and BEFORE or AFTER individually if predicting a
     pre and post category about the conditions before and after the change.
+
+    If the input TokenFeatureMaps has masks, invalid tokens are excluded from the
+    before/after means, and splits with no valid token on one side are excluded from
+    the evidence max-pooling and the split-attention softmax.
     """
 
     def __init__(
@@ -93,6 +98,7 @@ class BreakpointScan(IntermediateComponent):
                 f"{len(intermediates.feature_maps)}"
             )
         feature = intermediates.feature_maps[0]
+        mask = intermediates.get_masks()[0]
         B, C, H, W, T = feature.shape
         if C != self.in_dim:
             raise ValueError(f"BreakpointScan expected {self.in_dim} channels, got {C}")
@@ -100,25 +106,51 @@ class BreakpointScan(IntermediateComponent):
             raise ValueError(f"BreakpointScan needs at least 2 tokens, got {T}")
 
         S = T - 1
+        # Per-split counts of valid tokens before (inclusive) and after each split.
+        valid_split: torch.Tensor | None = None
+        if mask is not None:
+            valid = mask.to(feature.dtype).unsqueeze(1)  # (B, 1, H, W, T)
+            feature = feature * valid
+            cum_counts = valid.cumsum(dim=-1)  # (B, 1, H, W, T)
+            counts_before = cum_counts[..., :-1]  # (B, 1, H, W, S)
+            counts_after = cum_counts[..., -1:] - cum_counts[..., :-1]
+            # A split is only meaningful if both sides have at least one valid token.
+            valid_split = (counts_before > 0) & (counts_after > 0)  # (B, 1, H, W, S)
+            valid_split = rearrange(valid_split, "b 1 h w s -> b s h w")
+        else:
+            counts_before = torch.arange(
+                1, T, device=feature.device, dtype=feature.dtype
+            )
+            counts_after = T - counts_before
+
         cums = feature.cumsum(dim=-1)  # (B, C, H, W, T)
         total = cums[..., -1:]
-        counts = torch.arange(1, T, device=feature.device, dtype=feature.dtype)
-        before = cums[..., :-1] / counts  # (B, C, H, W, S) mean of tokens [0, t]
-        after = (total - cums[..., :-1]) / (T - counts)  # mean of tokens (t, T)
+        # (B, C, H, W, S) mean of valid tokens in [0, t]
+        before = cums[..., :-1] / counts_before.clamp(min=1)
+        # mean of valid tokens in (t, T)
+        after = (total - cums[..., :-1]) / counts_after.clamp(min=1)
         con = (after - before).abs()
 
         # Scorer over all splits: fold S into the batch dimension.
-        con = con.permute(0, 4, 1, 2, 3).reshape(B * S, C, H, W)
+        con = rearrange(con, "b c h w s -> (b s) c h w")
         hidden = self.split_proj(con)  # (B*S, hidden, H, W)
         scores = self.split_score(hidden)  # (B*S, 1, H, W)
-        hidden = hidden.reshape(B, S, self.hidden, H, W)
-        scores = scores.reshape(B, S, H, W)
+        hidden = rearrange(hidden, "(b s) c h w -> b s c h w", b=B, s=S)
+        scores = rearrange(scores, "(b s) 1 h w -> b s h w", b=B, s=S)
 
         if self.output == BreakpointOutput.EVIDENCE:
+            if valid_split is not None:
+                # hidden is post-ReLU so zero is the minimum; invalid splits then
+                # never win the max unless every split is invalid (all zeros).
+                hidden = hidden.masked_fill(~valid_split.unsqueeze(2), 0.0)
             return FeatureMaps([hidden.max(dim=1).values])  # (B, hidden, H, W)
 
+        if valid_split is not None:
+            # Invalid splits get (near) zero attention weight. If every split at a
+            # location is invalid, the weights degrade to uniform rather than NaN.
+            scores = scores.masked_fill(~valid_split, torch.finfo(scores.dtype).min)
         w = F.softmax(scores, dim=1)  # (B, S, H, W)
-        w = w.permute(0, 2, 3, 1).unsqueeze(1)  # (B, 1, H, W, S)
+        w = rearrange(w, "b s h w -> b 1 h w s")
         if self.output == BreakpointOutput.BEFORE:
             return FeatureMaps([(before * w).sum(dim=-1)])  # (B, C, H, W)
         if self.output == BreakpointOutput.AFTER:

@@ -1,3 +1,4 @@
+import pytest
 import torch
 
 from rslearn.models.attention_pooling import AttentionPool, SimpleAttentionPool
@@ -138,3 +139,62 @@ def test_simple_attention_pool_spatial_preservation() -> None:
     assert not torch.allclose(vec_01, vec_10), "Positions (0,1) and (1,0) identical"
     assert not torch.allclose(vec_01, vec_11), "Positions (0,1) and (1,1) identical"
     assert not torch.allclose(vec_10, vec_11), "Positions (1,0) and (1,1) identical"
+
+
+@pytest.mark.parametrize(
+    "pooling",
+    [
+        AttentionPool(in_dim=MODEL_DIM, num_heads=NUM_HEADS),
+        AttentionPool(in_dim=MODEL_DIM, num_heads=NUM_HEADS, linear_on_kv=False),
+        SimpleAttentionPool(in_dim=MODEL_DIM),
+        SimpleAttentionPool(in_dim=MODEL_DIM, hidden_linear=True),
+    ],
+)
+def test_mask_matches_truncated_tokens(
+    pooling: AttentionPool | SimpleAttentionPool,
+) -> None:
+    """Masking trailing tokens gives the same result as dropping them."""
+    context = ModelContext(inputs=[], metadatas=[])
+    B, D, H, W, N = 2, MODEL_DIM, 2, 2, 6
+    num_valid = 4
+    feat_tokens = torch.randn(B, D, H, W, N)
+    mask = torch.ones(B, H, W, N, dtype=torch.bool)
+    mask[..., num_valid:] = False
+
+    masked = pooling(
+        TokenFeatureMaps(feature_maps=[feat_tokens], masks=[mask]), context
+    ).feature_maps[0]
+    truncated = pooling(
+        TokenFeatureMaps(feature_maps=[feat_tokens[..., :num_valid]]), context
+    ).feature_maps[0]
+    assert masked.shape == (B, D, H, W)
+    assert torch.allclose(masked, truncated, atol=1e-5)
+
+    # Perturbing the masked tokens does not change the output.
+    feat_tokens2 = feat_tokens.clone()
+    feat_tokens2[..., num_valid:] += 100.0
+    masked2 = pooling(
+        TokenFeatureMaps(feature_maps=[feat_tokens2], masks=[mask]), context
+    ).feature_maps[0]
+    assert torch.allclose(masked, masked2, atol=1e-5)
+
+
+@pytest.mark.parametrize(
+    "pooling",
+    [
+        AttentionPool(in_dim=MODEL_DIM, num_heads=NUM_HEADS),
+        SimpleAttentionPool(in_dim=MODEL_DIM),
+    ],
+)
+def test_mask_all_invalid_no_nan(
+    pooling: AttentionPool | SimpleAttentionPool,
+) -> None:
+    """A location with no valid tokens still produces finite outputs."""
+    feat_tokens = torch.randn(1, MODEL_DIM, 1, 2, 4)
+    mask = torch.ones(1, 1, 2, 4, dtype=torch.bool)
+    mask[:, 0, 1, :] = False
+    out = pooling(
+        TokenFeatureMaps(feature_maps=[feat_tokens], masks=[mask]),
+        ModelContext(inputs=[], metadatas=[]),
+    ).feature_maps[0]
+    assert torch.isfinite(out).all()

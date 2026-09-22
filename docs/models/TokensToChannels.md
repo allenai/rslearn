@@ -17,6 +17,12 @@ passed directly to [SegmentationHead](SegmentationHead.md) with a
 [SegmentationTask](../TasksAndModels.md#segmentationtask) that has `num_classes` equal
 to the number of timesteps.
 
+If the input TokenFeatureMaps has masks, the output shape is unchanged, but the
+`out_dim` channels corresponding to each invalid token are overwritten with
+`mask_fill_value` (0 by default). With `out_dim: 1` and a SegmentationHead, you may
+want to set `mask_fill_value` to a large negative number so that padded timesteps are
+never predicted.
+
 ### Configuration
 
 ```yaml
@@ -27,6 +33,9 @@ to the number of timesteps.
               in_dim: 768
               # The number of output values per token. The default is 1.
               out_dim: 1
+              # The value written to the output channels of tokens that are
+              # marked invalid by the input mask (if any). The default is 0.
+              mask_fill_value: 0.0
 ```
 
 ### Example
@@ -44,7 +53,11 @@ tokens are exactly the T timesteps in chronological order. With OlmoEarth v1 mod
 N would instead be the number of timesteps times the number of band sets summed over
 modalities, so the tokens would no longer correspond one-to-one with timesteps.
 
-Every window must contain the same number of Sentinel-2 layers so that N is fixed.
+Every window should contain the same number of Sentinel-2 layers so that N is fixed
+across batches (the number of output channels must match `num_classes`). Within a
+batch, if a window has fewer images, OlmoEarth pads the token dimension and marks the
+padded tokens invalid in the TokenFeatureMaps mask; TokensToChannels then writes
+`mask_fill_value` into the corresponding output channels.
 
 TokensToChannels produces a `B x 12 x (H/4) x (W/4)` feature map (12 monthly logits at
 each patch), which we upsample to the input resolution before SegmentationHead

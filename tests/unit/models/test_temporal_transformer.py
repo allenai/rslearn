@@ -59,3 +59,51 @@ def test_positional_embedding() -> None:
     out = model(TokenFeatureMaps([x]), ModelContext(inputs=[], metadatas=[]))
     tokens = out.feature_maps[0][0, :, 0, 0, :]  # (C, N)
     assert not torch.allclose(tokens[:, 0], tokens[:, 1])
+
+
+def test_mask_excludes_tokens_and_passes_through() -> None:
+    """Masked tokens do not influence valid tokens, and masks are passed through."""
+    model = TemporalTransformer(dim=DIM, depth=1, num_heads=2, dim_feedforward=32)
+    model.eval()
+    context = ModelContext(inputs=[], metadatas=[])
+    num_valid = 3
+    x = torch.randn(1, DIM, 1, 2, NUM_TOKENS)
+    mask = torch.ones(1, 1, 2, NUM_TOKENS, dtype=torch.bool)
+    mask[..., num_valid:] = False
+
+    out = model(TokenFeatureMaps([x], masks=[mask]), context)
+    assert isinstance(out, TokenFeatureMaps)
+    assert out.masks is not None
+    assert torch.equal(out.masks[0], mask)
+    assert out.feature_maps[0].shape == x.shape
+    assert not torch.isnan(out.feature_maps[0]).any()
+
+    # Perturbing the masked tokens leaves the valid token outputs unchanged.
+    x2 = x.clone()
+    x2[..., num_valid:] += 5.0
+    out2 = model(TokenFeatureMaps([x2], masks=[mask]), context)
+    assert torch.allclose(
+        out.feature_maps[0][..., :num_valid],
+        out2.feature_maps[0][..., :num_valid],
+        atol=1e-5,
+    )
+
+    # The valid token outputs match running the transformer on the truncated
+    # (unmasked) sequence.
+    out_trunc = model(TokenFeatureMaps([x[..., :num_valid]]), context)
+    assert torch.allclose(
+        out.feature_maps[0][..., :num_valid], out_trunc.feature_maps[0], atol=1e-5
+    )
+
+
+def test_all_masked_location_no_nan() -> None:
+    """A location where every token is masked still produces finite outputs."""
+    model = TemporalTransformer(dim=DIM, depth=1, num_heads=2, dim_feedforward=32)
+    model.eval()
+    x = torch.randn(1, DIM, 1, 2, NUM_TOKENS)
+    mask = torch.ones(1, 1, 2, NUM_TOKENS, dtype=torch.bool)
+    mask[:, 0, 1, :] = False
+    out = model(
+        TokenFeatureMaps([x], masks=[mask]), ModelContext(inputs=[], metadatas=[])
+    )
+    assert torch.isfinite(out.feature_maps[0]).all()

@@ -19,7 +19,9 @@ class TemporalTransformer(IntermediateComponent):
     if the per-timestep tokens are derived by concatenating the outputs of a
     single-timestep model across timesteps in an image time series.
 
-    The output has the same shape as the input.
+    The output has the same shape as the input. If the input TokenFeatureMaps has
+    masks, invalid tokens are excluded from attention (as key padding) and the masks
+    are passed through unchanged to the output.
     """
 
     def __init__(
@@ -69,13 +71,15 @@ class TemporalTransformer(IntermediateComponent):
             context: the model context.
 
         Returns:
-            a TokenFeatureMaps with the same shapes as the input.
+            a TokenFeatureMaps with the same shapes (and masks) as the input.
         """
         if not isinstance(intermediates, TokenFeatureMaps):
             raise ValueError("input to TemporalTransformer must be a TokenFeatureMaps")
 
         outputs = []
-        for feat_tokens in intermediates.feature_maps:
+        for feat_tokens, mask in zip(
+            intermediates.feature_maps, intermediates.get_masks()
+        ):
             b, _, h, w, n = feat_tokens.shape
             if (
                 self.positional_embedding_num_tokens is not None
@@ -88,6 +92,17 @@ class TemporalTransformer(IntermediateComponent):
             x = rearrange(feat_tokens, "b c h w n -> (b h w) n c")
             if self.temporal_pos is not None:
                 x = x + self.temporal_pos
-            x = self.temporal_encoder(x)
+
+            src_key_padding_mask = None
+            if mask is not None:
+                # True in src_key_padding_mask means the token is ignored.
+                padding_mask = ~rearrange(mask, "b h w n -> (b h w) n")
+                # If every token at a location is masked, attention would be NaN.
+                # Un-mask those rows; their outputs are meaningless anyway and
+                # downstream components should ignore them via the mask.
+                all_masked = padding_mask.all(dim=1, keepdim=True)
+                src_key_padding_mask = padding_mask & ~all_masked
+
+            x = self.temporal_encoder(x, src_key_padding_mask=src_key_padding_mask)
             outputs.append(rearrange(x, "(b h w) n c -> b c h w n", b=b, h=h, w=w))
-        return TokenFeatureMaps(outputs)
+        return TokenFeatureMaps(outputs, masks=intermediates.masks)

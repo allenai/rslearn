@@ -589,7 +589,10 @@ components in rslearn output one of the following types, defined in
   `token_pooling: false`, and consumed by components like
   [TokensToChannels](models/TokensToChannels.md) and
   [BreakpointScan](models/BreakpointScan.md) that reduce the token dimension to
-  produce a FeatureMaps.
+  produce a FeatureMaps. It also has an optional `masks` field: a list of BHWN bool
+  tensors (one per feature map) where True marks a valid token and False marks a
+  padded or missing token (in case the number of tokens varies across pixels or
+  samples). When `masks` is None, all tokens are valid.
 - FeatureVector: a flat feature vector. It consists of a single BxC tensor.
 
 #### Feature Extractor (First Encoder Component)

@@ -26,6 +26,14 @@ predicting a category of change, and `BEFORE` or `AFTER` individually if predict
 pre-change or post-change category describing the conditions before and after the
 change.
 
+If the input TokenFeatureMaps has masks, invalid tokens are excluded from the before
+and after means, and any split with no valid token on one of its sides is excluded
+from the `EVIDENCE` max-pooling and from the softmax over breakpoints. This allows
+samples in a batch to have different numbers of timesteps: the token dimension T is
+the maximum across the batch and the trailing padded tokens are masked. Locations with
+fewer than two valid tokens produce a well-defined (but uninformative) output rather
+than an error.
+
 ### Configuration
 
 ```yaml

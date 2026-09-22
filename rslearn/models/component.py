@@ -96,11 +96,54 @@ class TokenFeatureMaps:
     """An intermediate output type for multi-resolution BCHWN feature maps with a token dimension.
 
     Unlike `FeatureMaps`, these include an additional dimension for unpooled tokens.
+
+    The number of tokens N is fixed across the batch, but the optional `masks` field
+    can indicate which tokens are valid at each position so that variable-length
+    token sequences (e.g. a different number of timesteps per sample) can be
+    represented. Components that consume a TokenFeatureMaps should ignore tokens
+    where the mask is False; when `masks` is None, all tokens are valid.
     """
 
     # List of BxCxHxWxN feature maps at different scales, ordered from highest resolution
     # (most fine-grained) to lowest resolution (coarsest).
     feature_maps: list[torch.Tensor]
+
+    # Optional list of BxHxWxN bool masks, one per feature map, where True indicates a
+    # valid token and False indicates a padded/missing token that should be ignored.
+    masks: list[torch.Tensor] | None = None
+
+    def __post_init__(self) -> None:
+        """Validate that the masks (if any) align with the feature maps."""
+        if self.masks is None:
+            return
+        if len(self.masks) != len(self.feature_maps):
+            raise ValueError(
+                f"TokenFeatureMaps has {len(self.feature_maps)} feature maps but "
+                f"{len(self.masks)} masks"
+            )
+        for feat, mask in zip(self.feature_maps, self.masks):
+            b, _, h, w, n = feat.shape
+            if mask.shape != (b, h, w, n):
+                raise ValueError(
+                    f"TokenFeatureMaps mask shape {tuple(mask.shape)} does not match "
+                    f"feature map shape {tuple(feat.shape)} (expected BHWN)"
+                )
+            if mask.dtype != torch.bool:
+                raise ValueError(
+                    f"TokenFeatureMaps masks must be bool tensors, got {mask.dtype}"
+                )
+
+    def get_masks(self) -> list[torch.Tensor | None]:
+        """Get one optional BxHxWxN bool mask per feature map.
+
+        Returns:
+            a list aligned with `feature_maps`, where each entry is the mask for the
+                corresponding feature map, or None if `masks` is None (all tokens
+                valid).
+        """
+        if self.masks is None:
+            return [None] * len(self.feature_maps)
+        return list(self.masks)
 
 
 @dataclass

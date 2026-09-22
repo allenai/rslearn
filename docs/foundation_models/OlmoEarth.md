@@ -82,8 +82,12 @@ modalities. The v1.2 models use a single band set per modality, so when a single
 modality is passed, N is exactly the number of timesteps and the tokens are in
 chronological order. This makes v1.2 models suitable for components that operate on
 per-timestep tokens, like [TokensToChannels](../models/TokensToChannels.md) and
-[BreakpointScan](../models/BreakpointScan.md). All windows must contain the same number
-of images so that N is fixed.
+[BreakpointScan](../models/BreakpointScan.md).
+
+The TokenFeatureMaps also includes a BxHxWxN bool mask marking which tokens are valid.
+Within a batch, N is the maximum number of tokens across samples; if a sample has
+fewer timesteps (or is missing a modality), its extra token slots are padded and
+marked False in the mask.
 
 ## Fine-tuning Optimizer
 
