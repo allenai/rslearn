@@ -88,6 +88,7 @@ class OlmoEarth(FeatureExtractor):
         autocast_dtype: str | None = "bfloat16",
         token_pooling: bool = True,
         use_register_bottleneck_output: bool = False,
+        projected_register_dim: int | None = None,
         use_legacy_timestamps: bool = True,
         timestamp_error_tolerance: timedelta = timedelta(days=15),
         normalize: bool = False,
@@ -127,6 +128,13 @@ class OlmoEarth(FeatureExtractor):
                 encoder width) are returned as a single BxCxHxW feature map. Note that
                 this is unrelated to the classic ViT register tokens
                 (num_register_tokens).
+            projected_register_dim: read the detached low-dim student
+                (``projected_registers``) instead of the teacher registers, keeping its
+                first N dimensions. Distilled checkpoints emit both heads, and the
+                teacher is the default, so this is what selects the student. N is a
+                Matryoshka prefix: the student is trained so that ``[..., :N]`` is
+                itself a strong embedding, for each trained width. Requires
+                use_register_bottleneck_output.
             use_legacy_timestamps: set timestamps to dummy values [1 January 2024, 1 February 2024, ...]
                 instead of the actual timestamps of the input. The option to do this is preserved
                 for backwards compatability with finetuned models which were trained against this
@@ -230,6 +238,12 @@ class OlmoEarth(FeatureExtractor):
 
         self.token_pooling = token_pooling
         self.use_register_bottleneck_output = use_register_bottleneck_output
+        if projected_register_dim is not None and not use_register_bottleneck_output:
+            raise ValueError(
+                "projected_register_dim requires use_register_bottleneck_output=True "
+                "(the student only exists under the register bottleneck)"
+            )
+        self.projected_register_dim = projected_register_dim
         self.use_legacy_timestamps = use_legacy_timestamps
         self.timestamp_error_tolerance = timestamp_error_tolerance
 
@@ -800,16 +814,25 @@ class OlmoEarth(FeatureExtractor):
         if self.use_register_bottleneck_output:
             # Return the spatial register bottleneck latents instead of the encoder
             # patch tokens. The registers form an (n_h, n_w) grid; in dynamic-grid
-            # mode this matches the patch grid, and register_grid is set on the
-            # bottleneck during the forward pass.
+            # mode this matches the patch grid.
             if "registers" not in model_output:
                 raise ValueError(
                     "use_register_bottleneck_output=True but the model output has no "
                     "'registers' key; the loaded model must have a register bottleneck"
                 )
-            registers = model_output["registers"]  # [B, n_h*n_w, D]
-            n_h, n_w = self.model.register_bottleneck.register_grid
-            features = rearrange(registers, "b (h w) d -> b d h w", h=n_h, w=n_w)
+            registers = model_output["registers"]
+            if self.projected_register_dim is not None:
+                if "projected_registers" not in model_output:
+                    raise ValueError(
+                        "projected_register_dim is set but the model output has no "
+                        "'projected_registers'; this checkpoint has no detached "
+                        "register student"
+                    )
+                registers = model_output["projected_registers"][
+                    ..., : self.projected_register_dim
+                ]
+            # Register outputs are [B, n_h, n_w, D].
+            features = rearrange(registers, "b h w d -> b d h w")
             return FeatureMaps([features])
 
         # Apply temporal/modality pooling so we just have one feature per patch.
