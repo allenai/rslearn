@@ -1218,7 +1218,7 @@ def _stub_output(
         "registers": registers,
     }
     if projected is not None:
-        output["projected_registers"] = projected
+        output["student_registers"] = projected
     return output
 
 
@@ -1264,5 +1264,5 @@ def test_projected_register_dim_without_student_head() -> None:
     model = _register_model(
         _stub_output(torch.zeros(1, 2, 2, 16)), projected_register_dim=8
     )
-    with pytest.raises(ValueError, match="projected_registers"):
+    with pytest.raises(ValueError, match="student_registers"):
         model(_register_context())
