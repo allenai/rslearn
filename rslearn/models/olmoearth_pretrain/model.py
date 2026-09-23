@@ -129,7 +129,7 @@ class OlmoEarth(FeatureExtractor):
                 this is unrelated to the classic ViT register tokens
                 (num_register_tokens).
             projected_register_dim: read the detached low-dim student
-                (``projected_registers``) instead of the teacher registers, keeping its
+                (``student_registers``) instead of the teacher registers, keeping its
                 first N dimensions. Distilled checkpoints emit both heads, and the
                 teacher is the default, so this is what selects the student. N is a
                 Matryoshka prefix: the student is trained so that ``[..., :N]`` is
@@ -831,13 +831,13 @@ class OlmoEarth(FeatureExtractor):
                 )
             registers = model_output["registers"]
             if self.projected_register_dim is not None:
-                if "projected_registers" not in model_output:
+                if "student_registers" not in model_output:
                     raise ValueError(
                         "projected_register_dim is set but the model output has no "
-                        "'projected_registers'; this checkpoint has no detached "
+                        "'student_registers'; this checkpoint has no detached "
                         "register student"
                     )
-                registers = model_output["projected_registers"][
+                registers = model_output["student_registers"][
                     ..., : self.projected_register_dim
                 ]
             # Register outputs are [B, n_h, n_w, D].
