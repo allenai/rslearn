@@ -204,8 +204,15 @@ class OlmoEarth(FeatureExtractor):
                 self.embedding_size = EMBEDDING_SIZES[model_id]
 
         elif model_path is not None:
-            # Load from path.
-            model = load_model_from_path(
+            # Uses the full olmoearth_pretrain package if available (to pick up
+            # architecture updates), otherwise falls back to olmoearth_pretrain_minimal.
+            try:
+                from olmoearth_pretrain.model_loader import (
+                    load_model_from_path as load_from_path,
+                )
+            except ImportError:
+                load_from_path = load_model_from_path
+            model = load_from_path(
                 UPath(model_path), load_weights=not random_initialization
             )
 
