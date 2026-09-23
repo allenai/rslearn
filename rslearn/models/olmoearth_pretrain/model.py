@@ -204,9 +204,8 @@ class OlmoEarth(FeatureExtractor):
                 self.embedding_size = EMBEDDING_SIZES[model_id]
 
         elif model_path is not None:
-            # Uses the full olmoearth_pretrain package if available (the minimal one
-            # restricts the encoder to modalities a released bundle does not carry),
-            # otherwise falls back to olmoearth_pretrain_minimal.
+            # Uses the full olmoearth_pretrain package if available (to pick up
+            # architecture updates), otherwise falls back to olmoearth_pretrain_minimal.
             try:
                 from olmoearth_pretrain.model_loader import (
                     load_model_from_path as load_from_path,
