@@ -51,6 +51,9 @@ COMPLETED_FNAME = "completed"
 # Special filename to store the bands that are present in a raster.
 BANDS_FNAME = "bands.json"
 
+# Supported methods for georeferencing rasters that only have ground control points.
+GCP_TRANSFORM_METHODS = {"polynomial", "tps"}
+
 
 class DefaultTileStore(TileStore):
     """Default TileStore implementation.
@@ -70,6 +73,7 @@ class DefaultTileStore(TileStore):
         tile_size: int = 256,
         geotiff_options: dict[str, Any] = {},
         vector_format: VectorFormat = GeojsonVectorFormat(),
+        gcp_transform_method: str = "polynomial",
     ):
         """Create a new DefaultTileStore.
 
@@ -85,12 +89,26 @@ class DefaultTileStore(TileStore):
             tile_size: if converting to COGs, the tile size to use.
             geotiff_options: other options to pass to rasterio.open (for writes).
             vector_format: format to use for storing vector data.
+            gcp_transform_method: how to georeference rasters that specify ground
+                control points (GCPs) instead of a CRS and transform. "polynomial"
+                (the default) lets GDAL fit a single global polynomial through the
+                GCPs. "tps" fits a thin plate spline that passes exactly through
+                every GCP, so local deviations in the GCP grid (e.g. terrain-induced
+                displacement in non-terrain-corrected SAR products) are honored
+                instead of being averaged out by the global fit.
         """
+        if gcp_transform_method not in GCP_TRANSFORM_METHODS:
+            raise ValueError(
+                f"unknown gcp_transform_method {gcp_transform_method}, "
+                f"expected one of {sorted(GCP_TRANSFORM_METHODS)}"
+            )
+
         self.path_suffix = path_suffix
         self.convert_rasters_to_cogs = convert_rasters_to_cogs
         self.tile_size = tile_size
         self.geotiff_options = geotiff_options
         self.vector_format = vector_format
+        self.gcp_transform_method = gcp_transform_method
 
         self.path: UPath | None = None
 
@@ -278,8 +296,21 @@ class DefaultTileStore(TileStore):
                     )
                     first_gcp_wgs84 = first_gcp_orig.to_projection(WGS84_PROJECTION)
                     crs = get_utm_ups_crs(first_gcp_wgs84.shp.x, first_gcp_wgs84.shp.y)
+
+                    # Extra options are forwarded to GDALCreateGenImgProjTransformer2.
+                    # By default GDAL fits a global polynomial (order 2 when there are
+                    # enough GCPs). MAX_GCP_ORDER=-1 is GDAL's switch for the thin
+                    # plate spline transformer instead. (We do not use METHOD=GCP_TPS
+                    # since rasterio does not forward that option.)
+                    warp_extras: dict[str, str] = {}
+                    if self.gcp_transform_method == "tps":
+                        # METHOD=GCP_TPS gets dropped by rasterio, so we instead rely on
+                        # setting the MAX_GCP_ORDER where -1 triggers thin plane spline.
+                        # See https://gdal.org/en/stable/api/gdal_alg.html
+                        warp_extras["MAX_GCP_ORDER"] = "-1"
+
                     with rasterio.vrt.WarpedVRT(
-                        src, crs=crs, resampling=Resampling.cubic
+                        src, crs=crs, resampling=Resampling.cubic, **warp_extras
                     ) as vrt:
                         array = vrt.read()
                         transform = vrt.transform

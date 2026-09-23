@@ -1,9 +1,11 @@
+import math
 import pathlib
 
 import numpy as np
 import pytest
 import rasterio
 import shapely
+from rasterio.control import GroundControlPoint
 from rasterio.crs import CRS
 from upath import UPath
 
@@ -125,6 +127,69 @@ def test_write_raster_file_preserves_nodata(tmp_path: pathlib.Path) -> None:
     with rasterio.open(stored_fname) as raster:
         assert raster.nodata == 65535
         np.testing.assert_array_equal(raster.read(), src_array)
+
+
+def test_write_raster_file_gcp_transform_method(tmp_path: pathlib.Path) -> None:
+    # Write a GCP-only GeoTIFF (no CRS/transform) with 10 m pixels. The GCPs on the
+    # image border are an exact affine mapping, but the center GCP is displaced 200 m
+    # in x, imitating the local terrain-induced displacement in non-terrain-corrected
+    # SAR. A bright blob at the center lets us see where each method places it. The
+    # GCPs are already in UTM, so write_raster_file will select the same CRS for
+    # output and the expected blob position is simply the center GCP's coordinate.
+    # We need 9 GCPs: with fewer than 6, GDAL ignores the transformer options, and
+    # with 6-7 the default 2nd-order polynomial has enough parameters to fit exactly.
+    size = 200
+    center = size // 2
+    gcp_crs = CRS.from_epsg(32610)
+    displacement = 200
+    expected_x, expected_y = 501000 + displacement, 4000000
+    # Normal GCPs.
+    gcps = [
+        GroundControlPoint(row=row, col=col, x=500000 + col * 10, y=4001000 - row * 10)
+        for row in [0, center, size]
+        for col in [0, center, size]
+        if (row, col) != (center, center)
+    ]
+    # Displaced GCP.
+    gcps.append(GroundControlPoint(row=center, col=center, x=expected_x, y=expected_y))
+
+    # Create array with bright blob.
+    array = np.zeros((1, size, size), dtype=np.uint8)
+    array[0, center - 5 : center + 5, center - 5 : center + 5] = 255
+
+    source_fname = tmp_path / "gcp_source.tif"
+    with rasterio.open(
+        source_fname,
+        "w",
+        driver="GTiff",
+        width=size,
+        height=size,
+        count=1,
+        dtype="uint8",
+    ) as dst:
+        dst.gcps = (gcps, gcp_crs)
+        dst.write(array)
+
+    # Now check the error from the displaced position after projecting with polynomial
+    # fit vs with thin plate spline. TPS should have lower error since it fits multiple
+    # local polynomials or something.
+    errors = {}
+    for method in ["polynomial", "tps"]:
+        tile_store = DefaultTileStore(gcp_transform_method=method)
+        tile_store.set_dataset_path(UPath(tmp_path / method))
+        tile_store.write_raster_file(LAYER_NAME, ITEM, BANDS, UPath(source_fname))
+        stored_fname = tile_store._get_raster_fname(LAYER_NAME, ITEM.name, BANDS)
+        with rasterio.open(stored_fname) as raster:
+            assert raster.crs == gcp_crs
+            rows, cols = np.nonzero(raster.read(1) > 127)
+            blob_x, blob_y = raster.transform * (cols.mean() + 0.5, rows.mean() + 0.5)
+        errors[method] = math.hypot(blob_x - expected_x, blob_y - expected_y)
+
+    # The global polynomial fit spreads the displacement over all GCPs, so the blob
+    # ends up ~90 m away from the center GCP. The thin plate spline passes through
+    # every GCP, so the blob is within a pixel or two.
+    assert errors["polynomial"] > displacement / 4
+    assert errors["tps"] < 20
 
 
 def test_leftover_tmp_file(tmp_path: pathlib.Path) -> None:
