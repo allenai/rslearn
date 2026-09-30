@@ -24,3 +24,19 @@ def test_interpolate_to_grid_linear_griddata() -> None:
     np.testing.assert_allclose(grid[0, 1, 1], 4.0, rtol=1e-6)
     assert projection.x_resolution == 1.0
     assert projection.y_resolution == 1.0
+
+
+def test_interpolate_to_grid_custom_nodata() -> None:
+    data = np.array([[1.0, 2.0, 3.0]], dtype=np.float32)
+    lon = np.array([0.0, 1.0, 0.0], dtype=np.float64)
+    lat = np.array([0.0, 0.0, 1.0], dtype=np.float64)
+
+    grid, _, _ = interpolate_to_grid(
+        data=data,
+        lon=lon,
+        lat=lat,
+        grid_resolution=1.0,
+        nodata_value=-9999.0,
+    )
+
+    assert grid[0, 1, 1] == -9999.0

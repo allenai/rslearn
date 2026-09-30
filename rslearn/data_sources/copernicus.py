@@ -9,7 +9,7 @@ import xml.etree.ElementTree as ET
 from collections.abc import Callable
 from datetime import datetime
 from enum import StrEnum
-from typing import Any
+from typing import Any, ClassVar
 from urllib.parse import quote
 from zipfile import ZipFile
 
@@ -170,8 +170,6 @@ def get_sentinel2_tiles(geometry: STGeometry, cache_dir: UPath) -> list[str]:
 class ApiError(Exception):
     """An error from Copernicus API."""
 
-    pass
-
 
 class CopernicusItem(Item):
     """An item in the Copernicus data source."""
@@ -239,7 +237,7 @@ class Copernicus(DataSource):
         sort_by: str | None = None,
         sort_desc: bool = False,
         timeout: float = 10,
-        context: DataSourceContext = DataSourceContext(),
+        context: DataSourceContext = DataSourceContext(),  # noqa: B008
     ):
         """Create a new Copernicus.
 
@@ -507,7 +505,11 @@ class Copernicus(DataSource):
         raise ValueError(f"no zip member matching {pattern}")
 
     def _process_product_zip(
-        self, tile_store: TileStoreWithLayer, item: CopernicusItem, local_zip_fname: str
+        self,
+        tile_store: TileStoreWithLayer,
+        item: CopernicusItem,
+        local_zip_fname: str,
+        geometries: list[STGeometry] | None = None,
     ) -> None:
         """Ingest rasters in the specified product zip file.
 
@@ -516,6 +518,8 @@ class Copernicus(DataSource):
             item: the item to download and ingest.
             local_zip_fname: the local filename where the product zip file has been
                 downloaded.
+            geometries: geometries that need this item, if the processor can use them
+                to limit work.
         """
         with ZipFile(local_zip_fname) as zipf:
             member_names = zipf.namelist()
@@ -554,7 +558,10 @@ class Copernicus(DataSource):
             items: the items to ingest
             geometries: a list of geometries needed for each item
         """
-        for item in items:
+        if len(items) != len(geometries):
+            raise ValueError("items and geometries must have the same length")
+
+        for item, item_geometries in zip(items, geometries, strict=True):
             # The product zip file is one big download, so we download it if any raster
             # hasn't been ingested yet.
             any_rasters_needed = False
@@ -591,11 +598,12 @@ class Copernicus(DataSource):
 
                 local_zip_fname = os.path.join(tmp_dir, "product.zip")
                 with open(local_zip_fname, "wb") as f:
-                    for chunk in response.iter_content(chunk_size=self.CHUNK_SIZE):
-                        f.write(chunk)
+                    f.writelines(response.iter_content(chunk_size=self.CHUNK_SIZE))
 
                 # Process each raster we need from the zip file.
-                self._process_product_zip(tile_store, item, local_zip_fname)
+                self._process_product_zip(
+                    tile_store, item, local_zip_fname, item_geometries
+                )
 
 
 class Sentinel2ProductType(StrEnum):
@@ -608,7 +616,7 @@ class Sentinel2ProductType(StrEnum):
 class Sentinel2(Copernicus):
     """A data source for Sentinel-2 data from the Copernicus API."""
 
-    BANDS = {
+    BANDS: ClassVar[dict[str, list[str]]] = {
         "B01": ["B01"],
         "B02": ["B02"],
         "B03": ["B03"],
@@ -631,7 +639,7 @@ class Sentinel2(Copernicus):
     }
 
     # Glob pattern for image files within the product zip file.
-    GLOB_PATTERNS = {
+    GLOB_PATTERNS: ClassVar[dict[Sentinel2ProductType, dict[str, str]]] = {
         Sentinel2ProductType.L1C: {
             "B01": "*/GRANULE/*/IMG_DATA/*_B01.jp2",
             "B02": "*/GRANULE/*/IMG_DATA/*_B02.jp2",
@@ -679,7 +687,7 @@ class Sentinel2(Copernicus):
         product_type: Sentinel2ProductType,
         harmonize: bool = False,
         assets: list[str] | None = None,
-        context: DataSourceContext = DataSourceContext(),
+        context: DataSourceContext = DataSourceContext(),  # noqa: B008
         **kwargs: Any,
     ):
         """Create a new Sentinel2.
@@ -730,7 +738,11 @@ class Sentinel2(Copernicus):
 
     # Override to support harmonization step.
     def _process_product_zip(
-        self, tile_store: TileStoreWithLayer, item: CopernicusItem, local_zip_fname: str
+        self,
+        tile_store: TileStoreWithLayer,
+        item: CopernicusItem,
+        local_zip_fname: str,
+        geometries: list[STGeometry] | None = None,
     ) -> None:
         """Ingest rasters in the specified product zip file.
 
@@ -739,6 +751,7 @@ class Sentinel2(Copernicus):
             item: the item to download and ingest.
             local_zip_fname: the local filename where the product zip file has been
                 downloaded.
+            geometries: geometries that need this item; unused for Sentinel-2.
         """
         with ZipFile(local_zip_fname) as zipf:
             member_names = zipf.namelist()
@@ -820,7 +833,7 @@ class Sentinel1OrbitDirection(StrEnum):
 class Sentinel1(Copernicus):
     """A data source for Sentinel-1 data from the Copernicus API."""
 
-    GLOB_TO_BANDS = {
+    GLOB_TO_BANDS: ClassVar[dict[Sentinel1Polarisation, dict[str, list[str]]]] = {
         Sentinel1Polarisation.VV_VH: {
             "*/measurement/*-vh-*.tiff": ["vh"],
             "*/measurement/*-vv-*.tiff": ["vv"],
@@ -835,7 +848,7 @@ class Sentinel1(Copernicus):
         product_type: Sentinel1ProductType,
         polarisation: Sentinel1Polarisation,
         orbit_direction: Sentinel1OrbitDirection | None = None,
-        context: DataSourceContext = DataSourceContext(),
+        context: DataSourceContext = DataSourceContext(),  # noqa: B008
         **kwargs: Any,
     ):
         """Create a new Sentinel1.
@@ -860,3 +873,538 @@ class Sentinel1(Copernicus):
             query_filter=query_filter,
             **kwargs,
         )
+
+
+OLCI_REFLECTANCE_BANDS = [f"Oa{idx:02d}_reflectance" for idx in range(1, 22)]
+"""Sentinel-3 OLCI EFR top-of-atmosphere reflectance bands."""
+
+SLSTR_REFLECTANCE_BANDS = [f"S{idx}_reflectance" for idx in range(1, 7)]
+"""Sentinel-3 SLSTR RBT nadir-view reflectance bands."""
+
+SLSTR_BT_BANDS = [f"S{idx}_BT" for idx in range(7, 10)]
+"""Sentinel-3 SLSTR RBT nadir-view brightness-temperature bands."""
+
+
+def _sentinel3_query_filter(instrument: str, product_type: str) -> str:
+    """Build a CDSE OData filter for one Sentinel-3 product family."""
+
+    def attribute_filter(name: str, value: str) -> str:
+        return (
+            "Attributes/OData.CSC.StringAttribute/any(att:"
+            f"att/Name eq '{quote(name)}' and "
+            "att/OData.CSC.StringAttribute/Value eq "
+            f"'{quote(value)}')"
+        )
+
+    return " and ".join(
+        [
+            "Collection/Name eq 'SENTINEL-3'",
+            attribute_filter("instrumentShortName", instrument),
+            attribute_filter("processingLevel", "1"),
+            attribute_filter("productType", product_type),
+        ]
+    )
+
+
+def _requested_bands(
+    context: DataSourceContext,
+    band_names: list[str] | None,
+    default_bands: list[str],
+) -> list[str]:
+    """Resolve and validate bands requested by a Sentinel-3 layer."""
+    if context.layer_config is not None:
+        band_names = [
+            band
+            for band_set in context.layer_config.band_sets
+            for band in band_set.bands
+        ]
+    elif band_names is None:
+        band_names = default_bands
+
+    # Preserve the documented order and silently collapse repeated bands across sets.
+    requested = set(band_names)
+    if not requested:
+        raise ValueError("at least one Sentinel-3 band must be requested")
+    unknown = requested.difference(default_bands)
+    if unknown:
+        raise ValueError(f"unsupported Sentinel-3 bands: {sorted(unknown)}")
+    return [band for band in default_bands if band in requested]
+
+
+def _interpolate_tie_points(
+    tie_values: npt.NDArray, target_shape: tuple[int, int]
+) -> npt.NDArray[np.float32]:
+    """Bilinearly interpolate a regular tie-point array to an image grid."""
+    values = np.asarray(tie_values, dtype=np.float32)
+    if values.ndim != 2:
+        raise ValueError(f"expected a 2D tie-point array, got shape {values.shape}")
+    if values.shape == target_shape:
+        return values.copy()
+
+    src_rows = np.linspace(0.0, 1.0, values.shape[0], dtype=np.float64)
+    src_cols = np.linspace(0.0, 1.0, values.shape[1], dtype=np.float64)
+    dst_rows = np.linspace(0.0, 1.0, target_shape[0], dtype=np.float64)
+    dst_cols = np.linspace(0.0, 1.0, target_shape[1], dtype=np.float64)
+
+    row_interpolated = np.empty((target_shape[0], values.shape[1]), dtype=np.float32)
+    for col_idx in range(values.shape[1]):
+        row_interpolated[:, col_idx] = np.interp(
+            dst_rows, src_rows, values[:, col_idx].astype(np.float64)
+        )
+
+    result = np.empty(target_shape, dtype=np.float32)
+    for row_idx in range(target_shape[0]):
+        result[row_idx, :] = np.interp(
+            dst_cols,
+            src_cols,
+            row_interpolated[row_idx, :].astype(np.float64),
+        )
+    return result
+
+
+def _radiance_to_reflectance(
+    radiance: npt.NDArray,
+    solar_irradiance: npt.NDArray,
+    cos_solar_zenith: npt.NDArray,
+) -> npt.NDArray[np.float32]:
+    """Convert top-of-atmosphere radiance to unitless reflectance."""
+    denominator = np.asarray(solar_irradiance, dtype=np.float32) * np.asarray(
+        cos_solar_zenith, dtype=np.float32
+    )
+    valid = np.isfinite(radiance) & np.isfinite(denominator) & (denominator > 1e-6)
+    result = np.full(np.shape(radiance), np.nan, dtype=np.float32)
+    result[valid] = (
+        np.pi * np.asarray(radiance, dtype=np.float32)[valid] / denominator[valid]
+    )
+    return result
+
+
+def _extract_zip_members(
+    zipf: ZipFile, basenames: set[str], output_dir: str
+) -> dict[str, pathlib.Path]:
+    """Extract uniquely named SAFE members and return paths by basename."""
+    by_basename: dict[str, list[str]] = {name: [] for name in basenames}
+    for member_name in zipf.namelist():
+        basename = pathlib.PurePosixPath(member_name).name
+        if basename in by_basename and not member_name.endswith("/"):
+            by_basename[basename].append(member_name)
+
+    extracted: dict[str, pathlib.Path] = {}
+    for basename, member_names in by_basename.items():
+        if len(member_names) != 1:
+            raise ValueError(
+                f"expected one {basename} member in Sentinel-3 product, "
+                f"found {len(member_names)}"
+            )
+        extracted[basename] = pathlib.Path(
+            zipf.extract(member_names[0], path=output_dir)
+        )
+    return extracted
+
+
+def _read_netcdf_variable(
+    path: pathlib.Path, variable_name: str, *, mask_and_scale: bool = True
+) -> npt.NDArray:
+    """Read one variable while keeping xarray an optional dependency."""
+    try:
+        import xarray as xr
+    except ImportError as exc:  # pragma: no cover - depends on optional environment
+        raise ImportError(
+            "Sentinel-3 ingestion requires the rslearn 'extra' dependencies"
+        ) from exc
+
+    with xr.open_dataset(path, mask_and_scale=mask_and_scale) as dataset:
+        if variable_name not in dataset:
+            raise ValueError(f"variable {variable_name!r} not found in {path.name}")
+        return np.asarray(dataset[variable_name].values)
+
+
+def _crop_swath(
+    data: npt.NDArray,
+    longitude: npt.NDArray,
+    latitude: npt.NDArray,
+    geometries: list[STGeometry] | None,
+    padding: float,
+) -> tuple[npt.NDArray, npt.NDArray, npt.NDArray]:
+    """Crop a swath to the row/column envelope needed by the requested windows."""
+    values = np.asarray(data)
+    lons = np.asarray(longitude)
+    lats = np.asarray(latitude)
+    if values.ndim != 3 or lons.shape != values.shape[1:] or lats.shape != lons.shape:
+        raise ValueError(
+            "expected data shaped (bands, rows, columns) with matching lon/lat; "
+            f"got {values.shape}, {lons.shape}, and {lats.shape}"
+        )
+    if not geometries:
+        return values, lons, lats
+
+    needed = np.zeros(lons.shape, dtype=bool)
+    for geometry in geometries:
+        min_lon, min_lat, max_lon, max_lat = geometry.to_wgs84().shp.bounds
+        # A conventional bounds tuple cannot represent a narrow antimeridian-crossing
+        # window. Avoid an incorrect crop in that uncommon case.
+        if max_lon - min_lon > 180:
+            return values, lons, lats
+        needed |= (
+            (lons >= min_lon - padding)
+            & (lons <= max_lon + padding)
+            & (lats >= min_lat - padding)
+            & (lats <= max_lat + padding)
+        )
+
+    rows, cols = np.nonzero(needed & np.isfinite(lons) & np.isfinite(lats))
+    if rows.size == 0:
+        raise ValueError(
+            "Sentinel-3 swath has no geolocated pixels near requested windows"
+        )
+
+    row_start = max(0, int(rows.min()) - 1)
+    row_end = min(lons.shape[0], int(rows.max()) + 2)
+    col_start = max(0, int(cols.min()) - 1)
+    col_end = min(lons.shape[1], int(cols.max()) + 2)
+    return (
+        values[:, row_start:row_end, col_start:col_end],
+        lons[row_start:row_end, col_start:col_end],
+        lats[row_start:row_end, col_start:col_end],
+    )
+
+
+def _write_swath(
+    tile_store: TileStoreWithLayer,
+    item: CopernicusItem,
+    band_names: list[str],
+    data: npt.NDArray,
+    longitude: npt.NDArray,
+    latitude: npt.NDArray,
+    grid_resolution: float,
+    nodata_value: float,
+) -> None:
+    """Interpolate and write one group of Sentinel-3 swath bands."""
+    from rslearn.utils.interpolation import interpolate_to_grid
+    from rslearn.utils.raster_array import RasterArray, RasterMetadata
+
+    gridded, projection, bounds = interpolate_to_grid(
+        data,
+        longitude,
+        latitude,
+        grid_resolution=grid_resolution,
+        nodata_value=nodata_value,
+    )
+    tile_store.write_raster(
+        item,
+        band_names,
+        projection,
+        bounds,
+        RasterArray(
+            chw_array=gridded,
+            time_range=item.geometry.time_range,
+            metadata=RasterMetadata(nodata_value=nodata_value),
+        ),
+    )
+
+
+class Sentinel3OlciEFR(Copernicus):
+    """Sentinel-3 OLCI Level-1 EFR top-of-atmosphere reflectance."""
+
+    PRODUCT_TYPE = "OL_1_EFR___"
+    DEFAULT_BANDS = OLCI_REFLECTANCE_BANDS
+
+    def __init__(
+        self,
+        band_names: list[str] | None = None,
+        grid_resolution: float = 0.0027,
+        nodata_value: float = -9999.0,
+        swath_padding: float = 0.1,
+        context: DataSourceContext = DataSourceContext(),  # noqa: B008
+        **kwargs: Any,
+    ) -> None:
+        """Create an OLCI EFR source.
+
+        Args:
+            band_names: bands to ingest when no layer configuration is available.
+            grid_resolution: intermediate WGS84 grid resolution in degrees.
+            nodata_value: value assigned outside the valid swath.
+            swath_padding: padding in degrees around requested windows before gridding.
+            context: data source context.
+            kwargs: additional options for :class:`Copernicus`.
+        """
+        if grid_resolution <= 0:
+            raise ValueError("grid_resolution must be positive")
+        if swath_padding < 0:
+            raise ValueError("swath_padding cannot be negative")
+        self.band_names = _requested_bands(context, band_names, self.DEFAULT_BANDS)
+        self.grid_resolution = grid_resolution
+        self.nodata_value = nodata_value
+        self.swath_padding = swath_padding
+        super().__init__(
+            glob_to_bands={"OLCI_EFR": self.band_names},
+            query_filter=_sentinel3_query_filter("OLCI", self.PRODUCT_TYPE),
+            context=context,
+            **kwargs,
+        )
+
+    def _process_product_zip(
+        self,
+        tile_store: TileStoreWithLayer,
+        item: CopernicusItem,
+        local_zip_fname: str,
+        geometries: list[STGeometry] | None = None,
+    ) -> None:
+        """Convert an OLCI SAFE product and ingest requested reflectance bands."""
+        if tile_store.is_raster_ready(item, self.band_names):
+            return
+
+        radiance_variables = {
+            band: band.replace("_reflectance", "_radiance") for band in self.band_names
+        }
+        required = {
+            "instrument_data.nc",
+            "tie_geometries.nc",
+            "geo_coordinates.nc",
+            *[f"{name}.nc" for name in radiance_variables.values()],
+        }
+        with tempfile.TemporaryDirectory() as tmp_dir, ZipFile(local_zip_fname) as zipf:
+            paths = _extract_zip_members(zipf, required, tmp_dir)
+
+            solar_flux = _read_netcdf_variable(
+                paths["instrument_data.nc"], "solar_flux", mask_and_scale=False
+            ).astype(np.float32)
+            detector_index = _read_netcdf_variable(
+                paths["instrument_data.nc"], "detector_index", mask_and_scale=False
+            ).astype(np.int64)
+            target_shape = detector_index.shape
+
+            solar_zenith = _interpolate_tie_points(
+                _read_netcdf_variable(paths["tie_geometries.nc"], "SZA"),
+                target_shape,
+            )
+            cos_solar_zenith = np.clip(
+                np.cos(np.deg2rad(solar_zenith)), 0.01, None
+            ).astype(np.float32)
+            latitude = _read_netcdf_variable(
+                paths["geo_coordinates.nc"], "latitude"
+            ).astype(np.float32)
+            longitude = _read_netcdf_variable(
+                paths["geo_coordinates.nc"], "longitude"
+            ).astype(np.float32)
+            if latitude.shape != target_shape or longitude.shape != target_shape:
+                raise ValueError(
+                    "OLCI geolocation and detector grids have different shapes: "
+                    f"{latitude.shape}, {longitude.shape}, and {target_shape}"
+                )
+
+            valid_detector = (detector_index >= 0) & (
+                detector_index < solar_flux.shape[1]
+            )
+            safe_detector = np.clip(detector_index, 0, solar_flux.shape[1] - 1)
+            arrays = []
+            for band_name, variable_name in radiance_variables.items():
+                band_index = int(band_name[2:4]) - 1
+                radiance = _read_netcdf_variable(
+                    paths[f"{variable_name}.nc"], variable_name
+                ).astype(np.float32)
+                reflectance = _radiance_to_reflectance(
+                    radiance,
+                    solar_flux[band_index][safe_detector],
+                    cos_solar_zenith,
+                )
+                arrays.append(np.where(valid_detector, reflectance, np.nan))
+
+        data, longitude, latitude = _crop_swath(
+            np.stack(arrays),
+            longitude,
+            latitude,
+            geometries,
+            self.swath_padding,
+        )
+        _write_swath(
+            tile_store,
+            item,
+            self.band_names,
+            data,
+            longitude,
+            latitude,
+            self.grid_resolution,
+            self.nodata_value,
+        )
+
+
+class Sentinel3SlstrRBT(Copernicus):
+    """Sentinel-3 SLSTR Level-1 nadir reflectance and brightness temperature."""
+
+    PRODUCT_TYPE = "SL_1_RBT___"
+    DEFAULT_BANDS = SLSTR_REFLECTANCE_BANDS + SLSTR_BT_BANDS
+
+    def __init__(
+        self,
+        band_names: list[str] | None = None,
+        reflectance_grid_resolution: float = 0.0045,
+        bt_grid_resolution: float = 0.009,
+        nodata_value: float = -9999.0,
+        swath_padding: float = 0.1,
+        context: DataSourceContext = DataSourceContext(),  # noqa: B008
+        **kwargs: Any,
+    ) -> None:
+        """Create an SLSTR RBT source.
+
+        Args:
+            band_names: bands to ingest when no layer configuration is available.
+            reflectance_grid_resolution: intermediate WGS84 resolution for S1-S6.
+            bt_grid_resolution: intermediate WGS84 resolution for S7-S9.
+            nodata_value: value assigned outside the valid swath.
+            swath_padding: padding in degrees around requested windows before gridding.
+            context: data source context.
+            kwargs: additional options for :class:`Copernicus`.
+        """
+        if reflectance_grid_resolution <= 0 or bt_grid_resolution <= 0:
+            raise ValueError("grid resolutions must be positive")
+        if swath_padding < 0:
+            raise ValueError("swath_padding cannot be negative")
+        self.band_names = _requested_bands(context, band_names, self.DEFAULT_BANDS)
+        self.reflectance_bands = [
+            band for band in SLSTR_REFLECTANCE_BANDS if band in self.band_names
+        ]
+        self.bt_bands = [band for band in SLSTR_BT_BANDS if band in self.band_names]
+        self.reflectance_grid_resolution = reflectance_grid_resolution
+        self.bt_grid_resolution = bt_grid_resolution
+        self.nodata_value = nodata_value
+        self.swath_padding = swath_padding
+        band_groups = {}
+        if self.reflectance_bands:
+            band_groups["SLSTR_RBT_REFLECTANCE"] = self.reflectance_bands
+        if self.bt_bands:
+            band_groups["SLSTR_RBT_BT"] = self.bt_bands
+        super().__init__(
+            glob_to_bands=band_groups,
+            query_filter=_sentinel3_query_filter("SLSTR", self.PRODUCT_TYPE),
+            context=context,
+            **kwargs,
+        )
+
+    def _process_product_zip(
+        self,
+        tile_store: TileStoreWithLayer,
+        item: CopernicusItem,
+        local_zip_fname: str,
+        geometries: list[STGeometry] | None = None,
+    ) -> None:
+        """Convert and ingest requested SLSTR reflectance and thermal bands."""
+        needs_reflectance = bool(
+            self.reflectance_bands
+        ) and not tile_store.is_raster_ready(item, self.reflectance_bands)
+        needs_bt = bool(self.bt_bands) and not tile_store.is_raster_ready(
+            item, self.bt_bands
+        )
+        if not needs_reflectance and not needs_bt:
+            return
+
+        required: set[str] = set()
+        if needs_reflectance:
+            required.update({"indices_an.nc", "geometry_tn.nc", "geodetic_an.nc"})
+            for band_name in self.reflectance_bands:
+                band = band_name.split("_")[0]
+                required.update({f"{band}_radiance_an.nc", f"{band}_quality_an.nc"})
+        if needs_bt:
+            required.add("geodetic_in.nc")
+            required.update(f"{band}_in.nc" for band in self.bt_bands)
+
+        with tempfile.TemporaryDirectory() as tmp_dir, ZipFile(local_zip_fname) as zipf:
+            paths = _extract_zip_members(zipf, required, tmp_dir)
+
+            if needs_reflectance:
+                detector = _read_netcdf_variable(
+                    paths["indices_an.nc"], "detector_an"
+                ).astype(np.float32)
+                valid_detector = np.isfinite(detector) & (detector >= 0)
+                safe_detector = np.clip(
+                    np.nan_to_num(detector, nan=0.0).astype(np.int64), 0, None
+                )
+                solar_zenith = _interpolate_tie_points(
+                    _read_netcdf_variable(paths["geometry_tn.nc"], "solar_zenith_tn"),
+                    detector.shape,
+                )
+                cos_solar_zenith = np.clip(
+                    np.cos(np.deg2rad(solar_zenith)), 0.01, None
+                ).astype(np.float32)
+                reflectance_arrays = []
+                for band_name in self.reflectance_bands:
+                    band = band_name.split("_")[0]
+                    radiance_name = f"{band}_radiance_an"
+                    irradiance_name = f"{band}_solar_irradiance_an"
+                    radiance = _read_netcdf_variable(
+                        paths[f"{radiance_name}.nc"], radiance_name
+                    ).astype(np.float32)
+                    detector_irradiance = _read_netcdf_variable(
+                        paths[f"{band}_quality_an.nc"], irradiance_name
+                    ).astype(np.float32)
+                    band_detector = np.clip(
+                        safe_detector, 0, detector_irradiance.size - 1
+                    )
+                    reflectance = _radiance_to_reflectance(
+                        radiance,
+                        detector_irradiance.reshape(-1)[band_detector],
+                        cos_solar_zenith,
+                    )
+                    reflectance_arrays.append(
+                        np.where(valid_detector, reflectance, np.nan)
+                    )
+                reflectance_latitude = _read_netcdf_variable(
+                    paths["geodetic_an.nc"], "latitude_an"
+                ).astype(np.float32)
+                reflectance_longitude = _read_netcdf_variable(
+                    paths["geodetic_an.nc"], "longitude_an"
+                ).astype(np.float32)
+
+            if needs_bt:
+                bt_arrays = []
+                for band in self.bt_bands:
+                    variable_name = f"{band}_in"
+                    bt_arrays.append(
+                        _read_netcdf_variable(
+                            paths[f"{variable_name}.nc"], variable_name
+                        ).astype(np.float32)
+                    )
+                bt_latitude = _read_netcdf_variable(
+                    paths["geodetic_in.nc"], "latitude_in"
+                ).astype(np.float32)
+                bt_longitude = _read_netcdf_variable(
+                    paths["geodetic_in.nc"], "longitude_in"
+                ).astype(np.float32)
+
+        if needs_reflectance:
+            data, longitude, latitude = _crop_swath(
+                np.stack(reflectance_arrays),
+                reflectance_longitude,
+                reflectance_latitude,
+                geometries,
+                self.swath_padding,
+            )
+            _write_swath(
+                tile_store,
+                item,
+                self.reflectance_bands,
+                data,
+                longitude,
+                latitude,
+                self.reflectance_grid_resolution,
+                self.nodata_value,
+            )
+
+        if needs_bt:
+            data, longitude, latitude = _crop_swath(
+                np.stack(bt_arrays),
+                bt_longitude,
+                bt_latitude,
+                geometries,
+                self.swath_padding,
+            )
+            _write_swath(
+                tile_store,
+                item,
+                self.bt_bands,
+                data,
+                longitude,
+                latitude,
+                self.bt_grid_resolution,
+                self.nodata_value,
+            )

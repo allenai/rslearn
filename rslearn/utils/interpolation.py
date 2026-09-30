@@ -22,6 +22,7 @@ def interpolate_to_grid(
     lon: npt.NDArray,
     lat: npt.NDArray,
     grid_resolution: float,
+    nodata_value: float = NODATA_VALUE,
 ) -> tuple[npt.NDArray, Projection, PixelBounds]:
     """Interpolate points onto a fixed-resolution grid.
 
@@ -30,6 +31,7 @@ def interpolate_to_grid(
         lon: longitude of each pixel (N). Pixels with NaN longitude are ignored.
         lat: latitude of each pixel (N). Pixels with NaN latitude are ignored.
         grid_resolution: the resolution of the grid.
+        nodata_value: value to use outside the interpolated swath.
 
     Returns:
         a tuple (array, projection, bounds) containing the gridded array along with
@@ -80,7 +82,7 @@ def interpolate_to_grid(
     ys = (np.arange(bounds[1], bounds[3]) * grid_resolution).astype(np.float64)
     grid_lon, grid_lat = np.meshgrid(xs, ys)
 
-    gridded_array = NODATA_VALUE * np.ones((num_bands, height, width), dtype=np.float32)
+    gridded_array = nodata_value * np.ones((num_bands, height, width), dtype=np.float32)
     points = np.column_stack([lon_valid, lat_valid])
 
     for band in range(num_bands):
@@ -94,7 +96,7 @@ def interpolate_to_grid(
             (grid_lon, grid_lat),
             method="linear",
         )
-        grid = np.where(np.isfinite(grid), grid, NODATA_VALUE).astype(np.float32)
+        grid = np.where(np.isfinite(grid), grid, nodata_value).astype(np.float32)
         gridded_array[band] = grid
 
     projection = Projection(CRS.from_epsg(WGS84_EPSG), grid_resolution, grid_resolution)
