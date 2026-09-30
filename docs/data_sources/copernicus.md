@@ -40,6 +40,24 @@ password. If the CDSE account requires two-factor authentication, generate the t
 externally with the required `totp` value and use `COPERNICUS_ACCESS_TOKEN`. Replace an
 expired token before resuming ingestion.
 
+### Live Sentinel-3 workflow check
+
+From a development checkout with `rslearn[extra,dev]` installed, the burner script runs
+the normal prepare, ingest, and materialize stages for a small window over Rome and
+exports the materialized raster as a GeoTIFF:
+
+```bash
+uv run python scripts/burn_sentinel3_workflow.py \
+  --source olci \
+  --output sentinel3_burner.tif
+```
+
+Credentials are read from the process environment or an untracked `.env` file. The
+available source checks are `olci`, `slstr-reflectance`, and `slstr-bt`. Use
+`--dataset-dir` to retain the intermediate rslearn dataset for inspection. CDSE sends
+the complete SAFE archive during ingestion even though the script materializes only
+one representative band, so the download may take several minutes.
+
 ### Configuration
 
 ```jsonc
