@@ -1,3 +1,4 @@
+import os
 import pathlib
 import zipfile
 from datetime import UTC, datetime
@@ -5,6 +6,7 @@ from typing import Any
 from unittest.mock import MagicMock, patch
 
 import numpy as np
+import pytest
 import shapely
 import xarray as xr
 from upath import UPath
@@ -116,6 +118,13 @@ class TestSentinel3:
         assert "Collection/Name eq 'SENTINEL-3'" in source.query_filter
         assert "SL_1_RBT___" in source.query_filter
         assert "SLSTR" in source.query_filter
+
+    def test_catalogue_source_does_not_require_download_credentials(self) -> None:
+        with patch.dict(os.environ, {}, clear=True):
+            source = Sentinel3OlciEFR(band_names=["Oa01_reflectance"])
+
+        with pytest.raises(ValueError, match="downloads require authentication"):
+            source._get_access_token()
 
     def test_olci_processes_synthetic_safe_product(
         self, tmp_path: pathlib.Path

@@ -4,6 +4,42 @@ This data source is for images from the ESA Copernicus OData API. See
 https://documentation.dataspace.copernicus.eu/APIs/OData.html for details about the API
 and how to get an access token.
 
+### Authentication
+
+Searching the public Copernicus catalogue does not require authentication. Downloading
+and ingesting a product does require a free
+[Copernicus Data Space account](https://dataspace.copernicus.eu/).
+
+rslearn checks credentials in this order:
+
+1. the `access_token` data-source argument;
+2. the `COPERNICUS_ACCESS_TOKEN` environment variable;
+3. the `COPERNICUS_USERNAME` and `COPERNICUS_PASSWORD` environment variables.
+
+For unattended or multi-product ingestion, setting the username and password lets
+rslearn request a fresh access token when each product download begins:
+
+```bash
+export COPERNICUS_USERNAME="your-login"
+export COPERNICUS_PASSWORD="your-password"
+```
+
+Keep credentials out of dataset configuration files and source control. Use your
+shell, deployment secret manager, or an untracked environment file to set them.
+
+Alternatively, follow the official
+[CDSE token-generation instructions](https://documentation.dataspace.copernicus.eu/APIs/Token.html)
+and export the resulting short-lived token:
+
+```bash
+export COPERNICUS_ACCESS_TOKEN="your-access-token"
+```
+
+rslearn's automatic username/password exchange does not accept a time-based one-time
+password. If the CDSE account requires two-factor authentication, generate the token
+externally with the required `totp` value and use `COPERNICUS_ACCESS_TOKEN`. Replace an
+expired token before resuming ingestion.
+
 ### Configuration
 
 ```jsonc
@@ -17,11 +53,8 @@ and how to get an access token.
       "*/GRANULE/*/IMG_DATA/*_B01.jp2": ["B01"],
       "*/GRANULE/*/IMG_DATA/*_TCI.jp2": ["R", "G", "B"]
     },
-    // Optional API access token. See https://documentation.dataspace.copernicus.eu/APIs/OData.html
-    // for how to get a token. If not set, it is read from the environment variable
-    // COPERNICUS_ACCESS_TOKEN. If that environment variable doesn't exist, then we
-    // attempt to read the username/password from COPERNICUS_USERNAME and
-    // COPERNICUS_PASSWORD (this is useful since access tokens are only valid for an hour).
+    // Optional API access token. See Authentication above. If omitted, rslearn checks
+    // COPERNICUS_ACCESS_TOKEN, then COPERNICUS_USERNAME and COPERNICUS_PASSWORD.
     "access_token": null,
     // Optional query filter string to include when searching for items. This will be
     // appended to other name, geographic, and sensing time filters where applicable. For

@@ -281,8 +281,8 @@ class Copernicus(DataSource):
             if "COPERNICUS_ACCESS_TOKEN" in os.environ:
                 self.access_token = os.environ["COPERNICUS_ACCESS_TOKEN"]
             else:
-                self.username = os.environ["COPERNICUS_USERNAME"]
-                self.password = os.environ["COPERNICUS_PASSWORD"]
+                self.username = os.environ.get("COPERNICUS_USERNAME")
+                self.password = os.environ.get("COPERNICUS_PASSWORD")
 
     def deserialize_item(self, serialized_item: dict) -> CopernicusItem:
         """Deserializes an item from JSON-decoded data."""
@@ -474,6 +474,13 @@ class Copernicus(DataSource):
         if self.access_token is not None:
             return self.access_token
 
+        if self.username is None or self.password is None:
+            raise ValueError(
+                "Copernicus product downloads require authentication. Set "
+                "COPERNICUS_ACCESS_TOKEN, or set both COPERNICUS_USERNAME and "
+                "COPERNICUS_PASSWORD. Catalogue searches do not require credentials."
+            )
+
         response = requests.post(
             self.TOKEN_URL,
             data={
@@ -484,7 +491,11 @@ class Copernicus(DataSource):
             },
             timeout=self.timeout,
         )
-        return response.json()["access_token"]
+        response.raise_for_status()
+        token = response.json().get("access_token")
+        if not token:
+            raise ApiError("Copernicus token response did not contain an access token")
+        return str(token)
 
     def _zip_member_glob(self, member_names: list[str], pattern: str) -> str:
         """Pick the zip member name that matches the given pattern.
