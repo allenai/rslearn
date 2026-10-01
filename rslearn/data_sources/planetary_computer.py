@@ -967,11 +967,10 @@ class Sentinel3SlstrLST(PlanetaryComputer):
                 f"expected lon/lat arrays to have same shape, got {lons.shape} and {lats.shape}"
             )
         step = max(1, self.sample_step)
-        lons_s = lons[::step, ::step]
-        lats_s = lats[::step, ::step]
-
-        lon_diff = np.abs(np.diff(lons_s, axis=1)).ravel()
-        lat_diff = np.abs(np.diff(lats_s, axis=0)).ravel()
+        # Subsample only the orthogonal axis so each difference is between adjacent
+        # pixels; striding both axes would measure spacing across `step` pixels.
+        lon_diff = np.abs(np.diff(lons[::step, :], axis=1)).ravel()
+        lat_diff = np.abs(np.diff(lats[:, ::step], axis=0)).ravel()
         diffs = np.concatenate([lon_diff, lat_diff])
         diffs = diffs[np.isfinite(diffs) & (diffs > 0)]
         if diffs.size == 0:
