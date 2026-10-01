@@ -973,6 +973,79 @@ def _interpolate_tie_points(
     return result
 
 
+def _interpolate_tie_points_xy(
+    tie_values: npt.NDArray,
+    tie_x: npt.NDArray,
+    tie_y: npt.NDArray,
+    x: npt.NDArray,
+    y: npt.NDArray,
+) -> npt.NDArray[np.float32]:
+    """Bilinearly interpolate a tie-point array using image-plane coordinates.
+
+    SLSTR tie-point grids span a wider swath than the nadir image, so their edges do
+    not coincide with the image edges. Instead, both grids carry across-track (x) and
+    along-track (y) coordinates, and the tie grid is separable in those coordinates.
+
+    Args:
+        tie_values: values on the tie-point grid (rows, columns).
+        tie_x: across-track coordinate of each tie point (rows, columns).
+        tie_y: along-track coordinate of each tie point (rows, columns).
+        x: across-track coordinate of each image pixel.
+        y: along-track coordinate of each image pixel.
+
+    Returns:
+        the interpolated values with the shape of x, NaN more than one tie spacing
+            outside the tie grid.
+    """
+    from scipy.interpolate import RegularGridInterpolator
+
+    values = np.asarray(tie_values, dtype=np.float64)
+    tie_x = np.asarray(tie_x, dtype=np.float64)
+    tie_y = np.asarray(tie_y, dtype=np.float64)
+    if values.ndim != 2 or tie_x.shape != values.shape or tie_y.shape != values.shape:
+        raise ValueError(
+            "expected 2D tie-point values with matching x/y coordinates; got "
+            f"{values.shape}, {tie_x.shape}, and {tie_y.shape}"
+        )
+    if np.asarray(x).shape != np.asarray(y).shape:
+        raise ValueError("expected image x/y coordinates with matching shapes")
+
+    xs = tie_x[0, :]
+    ys = tie_y[:, 0]
+    if not (np.allclose(tie_x, xs[None, :]) and np.allclose(tie_y, ys[:, None])):
+        raise ValueError("tie-point x/y coordinates are not a separable grid")
+
+    # RegularGridInterpolator needs ascending axes; SLSTR x usually decreases.
+    if xs.size > 1 and xs[1] < xs[0]:
+        xs = xs[::-1]
+        values = values[:, ::-1]
+    if ys.size > 1 and ys[1] < ys[0]:
+        ys = ys[::-1]
+        values = values[::-1, :]
+
+    # The outermost image rows can sit slightly beyond the outermost tie rows, so
+    # extrapolate linearly, but only up to one tie spacing past the grid edge.
+    interpolator = RegularGridInterpolator(
+        (ys, xs), values, method="linear", bounds_error=False, fill_value=None
+    )
+    x_margin = np.abs(np.diff(xs)).max() if xs.size > 1 else 0.0
+    y_margin = np.abs(np.diff(ys)).max() if ys.size > 1 else 0.0
+    target_x = np.asarray(x, dtype=np.float64)
+    target_y = np.asarray(y, dtype=np.float64)
+    result = np.full(target_x.shape, np.nan, dtype=np.float32)
+    with np.errstate(invalid="ignore"):
+        valid = (
+            (target_x >= xs[0] - x_margin)
+            & (target_x <= xs[-1] + x_margin)
+            & (target_y >= ys[0] - y_margin)
+            & (target_y <= ys[-1] + y_margin)
+        )
+    result[valid] = interpolator(
+        np.column_stack([target_y[valid], target_x[valid]])
+    ).astype(np.float32)
+    return result
+
+
 def _radiance_to_reflectance(
     radiance: npt.NDArray,
     solar_irradiance: npt.NDArray,
@@ -1311,7 +1384,15 @@ class Sentinel3SlstrRBT(Copernicus):
 
         required: set[str] = set()
         if needs_reflectance:
-            required.update({"indices_an.nc", "geometry_tn.nc", "geodetic_an.nc"})
+            required.update(
+                {
+                    "indices_an.nc",
+                    "geometry_tn.nc",
+                    "geodetic_an.nc",
+                    "cartesian_tx.nc",
+                    "cartesian_an.nc",
+                }
+            )
             for band_name in self.reflectance_bands:
                 band = band_name.split("_")[0]
                 required.update({f"{band}_radiance_an.nc", f"{band}_quality_an.nc"})
@@ -1330,9 +1411,19 @@ class Sentinel3SlstrRBT(Copernicus):
                 safe_detector = np.clip(
                     np.nan_to_num(detector, nan=0.0).astype(np.int64), 0, None
                 )
-                solar_zenith = _interpolate_tie_points(
+                image_x = _read_netcdf_variable(paths["cartesian_an.nc"], "x_an")
+                image_y = _read_netcdf_variable(paths["cartesian_an.nc"], "y_an")
+                if image_x.shape != detector.shape or image_y.shape != detector.shape:
+                    raise ValueError(
+                        "SLSTR cartesian and detector grids have different shapes: "
+                        f"{image_x.shape}, {image_y.shape}, and {detector.shape}"
+                    )
+                solar_zenith = _interpolate_tie_points_xy(
                     _read_netcdf_variable(paths["geometry_tn.nc"], "solar_zenith_tn"),
-                    detector.shape,
+                    _read_netcdf_variable(paths["cartesian_tx.nc"], "x_tx"),
+                    _read_netcdf_variable(paths["cartesian_tx.nc"], "y_tx"),
+                    image_x,
+                    image_y,
                 )
                 cos_solar_zenith = np.clip(
                     np.cos(np.deg2rad(solar_zenith)), 0.01, None

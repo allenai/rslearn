@@ -77,9 +77,11 @@ def interpolate_to_grid(
     num_bands = data.shape[0]
     height = bounds[3] - bounds[1]
     width = bounds[2] - bounds[0]
-    # Construct lon/lat coordinates for each grid cell in the output.
-    xs = (np.arange(bounds[0], bounds[2]) * grid_resolution).astype(np.float64)
-    ys = (np.arange(bounds[1], bounds[3]) * grid_resolution).astype(np.float64)
+    # Construct lon/lat coordinates for each grid cell in the output. Pixel i covers
+    # [i, i+1) * grid_resolution, so sample at the cell center rather than its corner;
+    # sampling at the corner shifts the raster by half a pixel when georeferenced.
+    xs = ((np.arange(bounds[0], bounds[2]) + 0.5) * grid_resolution).astype(np.float64)
+    ys = ((np.arange(bounds[1], bounds[3]) + 0.5) * grid_resolution).astype(np.float64)
     grid_lon, grid_lat = np.meshgrid(xs, ys)
 
     gridded_array = nodata_value * np.ones((num_bands, height, width), dtype=np.float32)

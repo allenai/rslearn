@@ -19,6 +19,7 @@ from rslearn.data_sources.copernicus import (
     Sentinel3OlciEFR,
     Sentinel3SlstrRBT,
     _interpolate_tie_points,
+    _interpolate_tie_points_xy,
     _radiance_to_reflectance,
     get_sentinel2_tiles,
 )
@@ -89,6 +90,21 @@ class TestSentinel3:
         np.testing.assert_allclose(
             result,
             np.array([[0, 1, 2], [1, 2, 3], [2, 3, 4]], dtype=np.float32),
+        )
+
+    def test_tie_point_interpolation_uses_xy_coordinates(self) -> None:
+        # Tie grid spans x in [-2000, 2000] (decreasing) but the image only covers
+        # [0, 1000], so the image edges must not be stretched to the tie-grid edges.
+        tie_x = np.array([[2000, 0, -2000], [2000, 0, -2000]], dtype=np.float64)
+        tie_y = np.array([[0, 0, 0], [10, 10, 10]], dtype=np.float64)
+        values = np.array([[20, 0, -20], [30, 10, -10]], dtype=np.float32)
+        # Points within one tie spacing of the grid are extrapolated (y=15); points
+        # further out (x=5000) or without coordinates are NaN.
+        x = np.array([[0, 1000, np.nan], [500, 5000, 0]])
+        y = np.array([[0, 5, 0], [10, 0, 15]])
+        result = _interpolate_tie_points_xy(values, tie_x, tie_y, x, y)
+        np.testing.assert_allclose(
+            result, [[0, 15, np.nan], [15, np.nan, 15]], rtol=1e-6
         )
 
     def test_radiance_to_reflectance_preserves_unclipped_values(self) -> None:
@@ -211,11 +227,33 @@ class TestSentinel3:
                     np.array([[0, 1], [0, 1]], dtype=np.float32),
                 )
             },
+            # The tie grid is wider than the nadir image and x decreases, as in real
+            # products: image columns at x=0 and x=1000 fall within tie columns 1-2.
             "geometry_tn.nc": {
                 "solar_zenith_tn": (
                     ("tie_rows", "tie_cols"),
-                    np.zeros(shape, dtype=np.float32),
+                    np.array([[120, 0, 120], [120, 0, 120]], dtype=np.float32),
                 )
+            },
+            "cartesian_tx.nc": {
+                "x_tx": (
+                    ("tie_rows", "tie_cols"),
+                    np.array([[2000, 0, -2000], [2000, 0, -2000]], dtype=np.float64),
+                ),
+                "y_tx": (
+                    ("tie_rows", "tie_cols"),
+                    np.array([[0, 0, 0], [1000, 1000, 1000]], dtype=np.float64),
+                ),
+            },
+            "cartesian_an.nc": {
+                "x_an": (
+                    ("rows", "cols"),
+                    np.array([[0, 1000], [0, 1000]], dtype=np.float64),
+                ),
+                "y_an": (
+                    ("rows", "cols"),
+                    np.array([[0, 0], [1000, 1000]], dtype=np.float64),
+                ),
             },
             "geodetic_an.nc": {
                 "latitude_an": (
@@ -276,9 +314,9 @@ class TestSentinel3:
         reflectance_args = write_swath.call_args_list[0].args
         bt_args = write_swath.call_args_list[1].args
         assert reflectance_args[2] == ["S1_reflectance"]
+        # Column 0: SZA 0, irradiance 2. Column 1: SZA 60 (cos 0.5), irradiance 4.
         np.testing.assert_allclose(
-            reflectance_args[3],
-            [[[np.pi / 2, np.pi / 4], [np.pi / 2, np.pi / 4]]],
+            reflectance_args[3], np.full((1, 2, 2), np.pi / 2), rtol=1e-5
         )
         assert bt_args[2] == ["S7_BT"]
         np.testing.assert_allclose(bt_args[3], np.full((1, 2, 2), 280))
