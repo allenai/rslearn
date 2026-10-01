@@ -12,6 +12,14 @@ detailed page with configuration options and available bands. See
 
 ### Remote Sensing Images
 
+#### Sentinel-1
+
+| Data Source | Provider | Notes |
+|---|---|---|
+| [planetary_computer.Sentinel1](data_sources/planetary_computer_Sentinel1.md) | Microsoft Planetary Computer | terrain-corrected COGs, direct materialization |
+| [aws_sentinel1.Sentinel1](data_sources/aws_sentinel1_Sentinel1.md) | AWS (Sinergise) | GRD IW DV |
+| [copernicus.Sentinel1](data_sources/copernicus.md#rslearndata_sourcescopernicussentinel1) | ESA Copernicus OData API | IW GRDH |
+
 #### Sentinel-2
 
 | Data Source | Provider | Notes |
@@ -24,14 +32,6 @@ detailed page with configuration options and available bands. See
 | [earthdaily.Sentinel2C1L2A](data_sources/earthdaily_Sentinel2C1L2A.md) | EarthDaily | Collection 1 L2A (`sentinel-2-c1-l2a`), scale/offset reflectance |
 | [earthdaily.Sentinel2EDACloudMask](data_sources/earthdaily_Sentinel2EDACloudMask.md) | EarthDaily | Sentinel-2 EDA cloud mask (`sentinel-2-eda-cloud-mask`), categorical cloud-mask band |
 | [gcp_public_data.Sentinel2](data_sources/gcp_public_data_Sentinel2.md) | Google Cloud Storage | L1C and L2A scenes |
-
-#### Sentinel-1
-
-| Data Source | Provider | Notes |
-|---|---|---|
-| [planetary_computer.Sentinel1](data_sources/planetary_computer_Sentinel1.md) | Microsoft Planetary Computer | terrain-corrected COGs, direct materialization |
-| [aws_sentinel1.Sentinel1](data_sources/aws_sentinel1_Sentinel1.md) | AWS (Sinergise) | GRD IW DV |
-| [copernicus.Sentinel1](data_sources/copernicus.md#rslearndata_sourcescopernicussentinel1) | ESA Copernicus OData API | IW GRDH |
 
 #### Sentinel-3
 
