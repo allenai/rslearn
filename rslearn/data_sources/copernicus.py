@@ -9,7 +9,7 @@ import xml.etree.ElementTree as ET
 from collections.abc import Callable
 from datetime import datetime
 from enum import StrEnum
-from typing import Any, ClassVar
+from typing import Any
 from urllib.parse import quote
 from zipfile import ZipFile
 
@@ -170,6 +170,8 @@ def get_sentinel2_tiles(geometry: STGeometry, cache_dir: UPath) -> list[str]:
 class ApiError(Exception):
     """An error from Copernicus API."""
 
+    pass
+
 
 class CopernicusItem(Item):
     """An item in the Copernicus data source."""
@@ -237,7 +239,7 @@ class Copernicus(DataSource):
         sort_by: str | None = None,
         sort_desc: bool = False,
         timeout: float = 10,
-        context: DataSourceContext = DataSourceContext(),  # noqa: B008
+        context: DataSourceContext = DataSourceContext(),
     ):
         """Create a new Copernicus.
 
@@ -569,9 +571,6 @@ class Copernicus(DataSource):
             items: the items to ingest
             geometries: a list of geometries needed for each item
         """
-        if len(items) != len(geometries):
-            raise ValueError("items and geometries must have the same length")
-
         for item, item_geometries in zip(items, geometries, strict=True):
             # The product zip file is one big download, so we download it if any raster
             # hasn't been ingested yet.
@@ -609,7 +608,8 @@ class Copernicus(DataSource):
 
                 local_zip_fname = os.path.join(tmp_dir, "product.zip")
                 with open(local_zip_fname, "wb") as f:
-                    f.writelines(response.iter_content(chunk_size=self.CHUNK_SIZE))
+                    for chunk in response.iter_content(chunk_size=self.CHUNK_SIZE):
+                        f.write(chunk)
 
                 # Process each raster we need from the zip file.
                 self._process_product_zip(
@@ -627,7 +627,7 @@ class Sentinel2ProductType(StrEnum):
 class Sentinel2(Copernicus):
     """A data source for Sentinel-2 data from the Copernicus API."""
 
-    BANDS: ClassVar[dict[str, list[str]]] = {
+    BANDS = {
         "B01": ["B01"],
         "B02": ["B02"],
         "B03": ["B03"],
@@ -650,7 +650,7 @@ class Sentinel2(Copernicus):
     }
 
     # Glob pattern for image files within the product zip file.
-    GLOB_PATTERNS: ClassVar[dict[Sentinel2ProductType, dict[str, str]]] = {
+    GLOB_PATTERNS = {
         Sentinel2ProductType.L1C: {
             "B01": "*/GRANULE/*/IMG_DATA/*_B01.jp2",
             "B02": "*/GRANULE/*/IMG_DATA/*_B02.jp2",
@@ -698,7 +698,7 @@ class Sentinel2(Copernicus):
         product_type: Sentinel2ProductType,
         harmonize: bool = False,
         assets: list[str] | None = None,
-        context: DataSourceContext = DataSourceContext(),  # noqa: B008
+        context: DataSourceContext = DataSourceContext(),
         **kwargs: Any,
     ):
         """Create a new Sentinel2.
@@ -844,7 +844,7 @@ class Sentinel1OrbitDirection(StrEnum):
 class Sentinel1(Copernicus):
     """A data source for Sentinel-1 data from the Copernicus API."""
 
-    GLOB_TO_BANDS: ClassVar[dict[Sentinel1Polarisation, dict[str, list[str]]]] = {
+    GLOB_TO_BANDS = {
         Sentinel1Polarisation.VV_VH: {
             "*/measurement/*-vh-*.tiff": ["vh"],
             "*/measurement/*-vv-*.tiff": ["vv"],
@@ -859,7 +859,7 @@ class Sentinel1(Copernicus):
         product_type: Sentinel1ProductType,
         polarisation: Sentinel1Polarisation,
         orbit_direction: Sentinel1OrbitDirection | None = None,
-        context: DataSourceContext = DataSourceContext(),  # noqa: B008
+        context: DataSourceContext = DataSourceContext(),
         **kwargs: Any,
     ):
         """Create a new Sentinel1.
@@ -1114,11 +1114,6 @@ def _crop_swath(
     values = np.asarray(data)
     lons = np.asarray(longitude)
     lats = np.asarray(latitude)
-    if values.ndim != 3 or lons.shape != values.shape[1:] or lats.shape != lons.shape:
-        raise ValueError(
-            "expected data shaped (bands, rows, columns) with matching lon/lat; "
-            f"got {values.shape}, {lons.shape}, and {lats.shape}"
-        )
     if not geometries:
         return values, lons, lats
 
@@ -1199,7 +1194,7 @@ class Sentinel3OlciEFR(Copernicus):
         grid_resolution: float = 0.0027,
         nodata_value: float = -9999.0,
         swath_padding: float = 0.1,
-        context: DataSourceContext = DataSourceContext(),  # noqa: B008
+        context: DataSourceContext = DataSourceContext(),
         **kwargs: Any,
     ) -> None:
         """Create an OLCI EFR source.
@@ -1235,9 +1230,6 @@ class Sentinel3OlciEFR(Copernicus):
         geometries: list[STGeometry] | None = None,
     ) -> None:
         """Convert an OLCI SAFE product and ingest requested reflectance bands."""
-        if tile_store.is_raster_ready(item, self.band_names):
-            return
-
         radiance_variables = {
             band: band.replace("_reflectance", "_radiance") for band in self.band_names
         }
@@ -1326,7 +1318,7 @@ class Sentinel3SlstrRBT(Copernicus):
         bt_grid_resolution: float = 0.009,
         nodata_value: float = -9999.0,
         swath_padding: float = 0.1,
-        context: DataSourceContext = DataSourceContext(),  # noqa: B008
+        context: DataSourceContext = DataSourceContext(),
         **kwargs: Any,
     ) -> None:
         """Create an SLSTR RBT source.
@@ -1413,11 +1405,6 @@ class Sentinel3SlstrRBT(Copernicus):
                 )
                 image_x = _read_netcdf_variable(paths["cartesian_an.nc"], "x_an")
                 image_y = _read_netcdf_variable(paths["cartesian_an.nc"], "y_an")
-                if image_x.shape != detector.shape or image_y.shape != detector.shape:
-                    raise ValueError(
-                        "SLSTR cartesian and detector grids have different shapes: "
-                        f"{image_x.shape}, {image_y.shape}, and {detector.shape}"
-                    )
                 solar_zenith = _interpolate_tie_points_xy(
                     _read_netcdf_variable(paths["geometry_tn.nc"], "solar_zenith_tn"),
                     _read_netcdf_variable(paths["cartesian_tx.nc"], "x_tx"),

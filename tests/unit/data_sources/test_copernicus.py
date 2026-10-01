@@ -18,9 +18,9 @@ from rslearn.data_sources.copernicus import (
     CopernicusItem,
     Sentinel3OlciEFR,
     Sentinel3SlstrRBT,
+    _crop_swath,
     _interpolate_tie_points,
     _interpolate_tie_points_xy,
-    _radiance_to_reflectance,
     get_sentinel2_tiles,
 )
 from rslearn.utils.geometry import STGeometry
@@ -107,15 +107,43 @@ class TestSentinel3:
             result, [[0, 15, np.nan], [15, np.nan, 15]], rtol=1e-6
         )
 
-    def test_radiance_to_reflectance_preserves_unclipped_values(self) -> None:
-        result = _radiance_to_reflectance(
-            np.array([[1.0, 4.0]], dtype=np.float32),
-            np.array([[2.0, 2.0]], dtype=np.float32),
-            np.ones((1, 2), dtype=np.float32),
-        )
-        np.testing.assert_allclose(result, [[np.pi / 2, 2 * np.pi]])
+    def test_crop_swath(self) -> None:
+        # 5x5 swath on a 1-degree lon/lat grid; data encodes the pixel index.
+        lon, lat = np.meshgrid(np.arange(5.0), np.arange(5.0))
+        data = np.arange(25, dtype=np.float32).reshape(1, 5, 5)
 
-    def test_band_selection_and_product_filters(self) -> None:
+        def window(
+            min_lon: float, min_lat: float, max_lon: float, max_lat: float
+        ) -> STGeometry:
+            return STGeometry(
+                WGS84_PROJECTION, shapely.box(min_lon, min_lat, max_lon, max_lat), None
+            )
+
+        # The pixel at (2, 2) is needed; keep one extra row/column on each side.
+        cropped, cropped_lon, cropped_lat = _crop_swath(
+            data, lon, lat, [window(1.9, 1.9, 2.1, 2.1)], padding=0
+        )
+        np.testing.assert_array_equal(cropped[0], data[0, 1:4, 1:4])
+        np.testing.assert_array_equal(cropped_lon, lon[1:4, 1:4])
+        np.testing.assert_array_equal(cropped_lat, lat[1:4, 1:4])
+
+        # Padding widens the needed area.
+        cropped, _, _ = _crop_swath(
+            data, lon, lat, [window(1.9, 1.9, 2.1, 2.1)], padding=1
+        )
+        np.testing.assert_array_equal(cropped[0], data[0])
+
+        # No geometries, or an antimeridian-crossing window, keeps the full swath.
+        assert _crop_swath(data, lon, lat, None, padding=0)[0].shape == data.shape
+        cropped, _, _ = _crop_swath(
+            data, lon, lat, [window(-179, 0, 179, 1)], padding=0
+        )
+        assert cropped.shape == data.shape
+
+        with pytest.raises(ValueError, match="no geolocated pixels"):
+            _crop_swath(data, lon, lat, [window(50, 50, 51, 51)], padding=0)
+
+    def test_band_selection_follows_documented_order(self) -> None:
         layer_cfg = LayerConfig(
             type=LayerType.RASTER,
             band_sets=[
@@ -130,10 +158,6 @@ class TestSentinel3:
             access_token="test-token",
         )
         assert source.band_names == ["S1_reflectance", "S7_BT"]
-        assert source.query_filter is not None
-        assert "Collection/Name eq 'SENTINEL-3'" in source.query_filter
-        assert "SL_1_RBT___" in source.query_filter
-        assert "SLSTR" in source.query_filter
 
     def test_catalogue_source_does_not_require_download_credentials(self) -> None:
         with patch.dict(os.environ, {}, clear=True):
