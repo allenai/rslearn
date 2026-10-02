@@ -77,7 +77,13 @@ def _requested_bands(
 def _interpolate_tie_points(
     tie_values: npt.NDArray, target_shape: tuple[int, int]
 ) -> npt.NDArray[np.float32]:
-    """Bilinearly interpolate a tie-point array whose corners align with the image."""
+    """Bilinearly interpolate a tie-point array whose swath aligns with the image.
+
+    This is for tie-point grids that cover the same swath as the image, so the first
+    and last tie rows/columns coincide with the first and last image rows/columns
+    (e.g. OLCI). Use _interpolate_tie_points_xy when the tie grid extends beyond the
+    image swath (e.g. SLSTR).
+    """
     values = np.asarray(tie_values, dtype=np.float64)
     if values.ndim != 2:
         raise ValueError(f"expected a 2D tie-point array, got shape {values.shape}")
@@ -139,7 +145,8 @@ def _interpolate_tie_points_xy(
         values = values[::-1, :]
 
     # The outermost image rows can sit slightly beyond the outermost tie rows, so
-    # extrapolate linearly, but only up to one tie spacing past the grid edge.
+    # extrapolate linearly, but only up to one tie spacing past the grid edge. Any
+    # pixels beyond that margin are left as NaN instead of being extrapolated.
     interpolator = RegularGridInterpolator(
         (ys, xs), values, method="linear", bounds_error=False, fill_value=None
     )
