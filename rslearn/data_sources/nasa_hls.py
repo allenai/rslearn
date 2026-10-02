@@ -102,7 +102,8 @@ class _EarthdataAuth:
 
         if self.earthdata_token is None:
             raise ValueError(
-                f"NASA HLS requires an Earthdata bearer token. Set {_EARTHDATA_TOKEN_ENV}."
+                f"NASA Earthdata (LP DAAC) requires an Earthdata bearer token. "
+                f"Set {_EARTHDATA_TOKEN_ENV}."
             )
 
         self._credentials = self._refresh_with_token()

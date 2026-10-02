@@ -35,11 +35,8 @@ from rslearn.data_sources.nasa_hls import (
     _NasaHlsBase,
 )
 from rslearn.data_sources.stac import SourceItem
-from rslearn.log_utils import get_logger
 from rslearn.utils.geometry import STGeometry
 from rslearn.utils.stac import StacItem
-
-logger = get_logger(__name__)
 
 
 class EcostressLSTE(_NasaHlsBase):
@@ -59,6 +56,8 @@ class EcostressLSTE(_NasaHlsBase):
 
     COLLECTION_NAME = "ECO_L2T_LSTE_002"
     DEFAULT_BANDS = ["LST"]
+    # ECOSTRESS STAC items carry no cloud cover property (use the cloud band).
+    PROPERTIES_TO_RECORD: list[str] = []
     SUPPORTED_BANDS = [
         "LST",
         "LST_err",

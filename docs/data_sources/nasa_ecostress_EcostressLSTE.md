@@ -42,6 +42,10 @@ Because each layer is a separate COG, list the requested layers in `band_names`.
 LST time series, set `max_matches > 1` in the layer's `query_config` (like other
 rslearn sources, the default returns a single match).
 
+ECOSTRESS flies on the ISS, so overpasses occur at varying local times, including at
+night; there is no day/night STAC property to filter on, so time series may mix day and
+night acquisitions.
+
 ### Available Bands
 
 Default band:
