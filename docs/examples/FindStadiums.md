@@ -28,10 +28,8 @@ It consists of stadium points like this:
 One issue with the data is that, while some of these coordinates are at the center of
 the stadium, others are off to the side:
 
-<p float="left">
-<img src="FindStadiums/michigan_stadium.jpg" width="45%" />
-<img src="FindStadiums/johnson_hagood_stadium.jpg" width="45%" />
-</p>
+![Michigan Stadium](./FindStadiums/michigan_stadium.jpg){ width="45%" }
+![Johnson Hagood Stadium](./FindStadiums/johnson_hagood_stadium.jpg){ width="45%" }
 
 ## Data Strategy
 
@@ -70,10 +68,8 @@ make two more modifications:
 Here is an example label and corresponding Sentinel-2 image. Red is "stadium", green is
 "background", and black is nodata (will have masked loss).
 
-<p float="left">
-<img src="FindStadiums/sentinel2.jpg" width="45%" />
-<img src="FindStadiums/label.png" width="45%" />
-</p>
+![Sentinel-2 image](./FindStadiums/sentinel2.jpg){ width="45%" }
+![Stadium label](./FindStadiums/label.png){ width="45%" }
 
 ## Create Windows
 
@@ -484,10 +480,8 @@ qgis $DATASET_PATH/windows/predict/seattle/layers/sentinel2/*/geotiff.tif $DATAS
 
 The model picks up on Lumen Field, Husky Stadium, and several smaller sports fields.
 
-<p float="left">
-<img src="FindStadiums/seattle_image.jpg" width="45%" />
-<img src="FindStadiums/seattle_probs.png" width="45%" />
-</p>
+![Sentinel-2 image of Seattle](./FindStadiums/seattle_image.jpg){ width="45%" }
+![Stadium probabilities in Seattle](./FindStadiums/seattle_probs.png){ width="45%" }
 
 ## Compare Other Remote Sensing Foundation Models
 
