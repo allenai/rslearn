@@ -163,13 +163,12 @@ def _interpolate_tie_points_xy(
     target_x = np.asarray(x, dtype=np.float64)
     target_y = np.asarray(y, dtype=np.float64)
     result = np.full(target_x.shape, np.nan, dtype=np.float32)
-    with np.errstate(invalid="ignore"):
-        valid = (
-            (target_x >= xs[0] - x_margin)
-            & (target_x <= xs[-1] + x_margin)
-            & (target_y >= ys[0] - y_margin)
-            & (target_y <= ys[-1] + y_margin)
-        )
+    valid = (
+        (target_x >= xs[0] - x_margin)
+        & (target_x <= xs[-1] + x_margin)
+        & (target_y >= ys[0] - y_margin)
+        & (target_y <= ys[-1] + y_margin)
+    )
     result[valid] = interpolator(
         np.column_stack([target_y[valid], target_x[valid]])
     ).astype(np.float32)
