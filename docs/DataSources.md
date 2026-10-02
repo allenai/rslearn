@@ -12,6 +12,14 @@ detailed page with configuration options and available bands. See
 
 ### Remote Sensing Images
 
+#### Sentinel-1
+
+| Data Source | Provider | Notes |
+|---|---|---|
+| [planetary_computer.Sentinel1](data_sources/planetary_computer_Sentinel1.md) | Microsoft Planetary Computer | terrain-corrected COGs, direct materialization |
+| [aws_sentinel1.Sentinel1](data_sources/aws_sentinel1_Sentinel1.md) | AWS (Sinergise) | GRD IW DV |
+| [copernicus.Sentinel1](data_sources/copernicus.md#rslearndata_sourcescopernicussentinel1) | ESA Copernicus OData API | IW GRDH |
+
 #### Sentinel-2
 
 | Data Source | Provider | Notes |
@@ -25,13 +33,13 @@ detailed page with configuration options and available bands. See
 | [earthdaily.Sentinel2EDACloudMask](data_sources/earthdaily_Sentinel2EDACloudMask.md) | EarthDaily | Sentinel-2 EDA cloud mask (`sentinel-2-eda-cloud-mask`), categorical cloud-mask band |
 | [gcp_public_data.Sentinel2](data_sources/gcp_public_data_Sentinel2.md) | Google Cloud Storage | L1C and L2A scenes |
 
-#### Sentinel-1
+#### Sentinel-3
 
 | Data Source | Provider | Notes |
 |---|---|---|
-| [planetary_computer.Sentinel1](data_sources/planetary_computer_Sentinel1.md) | Microsoft Planetary Computer | terrain-corrected COGs, direct materialization |
-| [aws_sentinel1.Sentinel1](data_sources/aws_sentinel1_Sentinel1.md) | AWS (Sinergise) | GRD IW DV |
-| [copernicus.Sentinel1](data_sources/copernicus.md#rslearndata_sourcescopernicussentinel1) | ESA Copernicus OData API | IW GRDH |
+| [copernicus_sentinel3.Sentinel3OlciEFR](data_sources/copernicus.md#rslearndata_sourcescopernicus_sentinel3sentinel3olciefr) | ESA Copernicus Data Space | OLCI Level-1 EFR, 21 TOA reflectance bands, requires ingestion |
+| [copernicus_sentinel3.Sentinel3SlstrRBT](data_sources/copernicus.md#rslearndata_sourcescopernicus_sentinel3sentinel3slstrrbt) | ESA Copernicus Data Space | SLSTR Level-1 RBT, S1-S6 reflectance and S7-S9 brightness temperature, requires ingestion |
+| [planetary_computer.Sentinel3SlstrLST](data_sources/planetary_computer_Sentinel3SlstrLST.md) | Microsoft Planetary Computer | SLSTR Level-2 land-surface temperature, requires ingestion |
 
 #### Landsat
 
@@ -68,7 +76,6 @@ detailed page with configuration options and available bands. See
 | [aws_google_satellite_embedding_v1.GoogleSatelliteEmbeddingV1](data_sources/aws_google_satellite_embedding_v1.md) | AWS Open Data | Google Satellite Embedding v1 |
 | [google_earth_engine.GoogleSatelliteEmbeddings](data_sources/google_earth_engine_GoogleSatelliteEmbeddings.md) | Google Earth Engine | Google Satellite Embedding v1, requires GEE credentials |
 | [planetary_computer.PlanetaryComputer](data_sources/planetary_computer_PlanetaryComputer.md) | Microsoft Planetary Computer | Generic collection access |
-| [planetary_computer.Sentinel3SlstrLST](data_sources/planetary_computer_Sentinel3SlstrLST.md) | Microsoft Planetary Computer | Land Surface Temperature, requires ingestion |
 | [earthdaily.Biophysical](data_sources/earthdaily_Biophysical.md) | EarthDaily | LAI/FAPAR/FCOVER, requires EarthDaily credentials |
 | [xyz_tiles.XyzTiles](data_sources/xyz_tiles_XyzTiles.md) | Any XYZ tile server | Web slippy tiles |
 
