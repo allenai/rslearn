@@ -56,6 +56,22 @@ normal rslearn materialization.
 It requires the optional NetCDF/xarray/scipy dependencies included in
 `rslearn[extra]`. Direct materialization is not supported; keep ingestion enabled.
 
+!!! warning "Changing windows after ingestion"
+
+    Ingestion crops each swath to the requested windows plus `swath_padding`, and the
+    tile store does not expand an item that is already marked complete. If windows are
+    added, moved, or resized after ingestion, clear this layer's cached tile-store
+    entries and ingest it again. With the default tile store, remove the corresponding
+    layer (or layer alias) directory under `<dataset_path>/tiles/`. Then run the
+    following commands for the affected windows and layer:
+
+    ```bash
+    rslearn dataset prepare --root <dataset_path> --enabled-layers <layer_name> --force
+    rslearn dataset ingest --root <dataset_path> --enabled-layers <layer_name>
+    ```
+
+    Custom tile stores must be cleared through their configured backend.
+
 ### Configuration
 
 ```jsonc
@@ -91,6 +107,22 @@ nadir-view S7-S9 brightness temperatures in kelvin.
 The reflective and thermal channels are ingested independently because they use
 different native grids. They may be placed in separate rslearn band sets with distinct
 materialization resolutions. The source requires `rslearn[extra]` and ingestion.
+
+!!! warning "Changing windows after ingestion"
+
+    Ingestion crops each swath to the requested windows plus `swath_padding`, and the
+    tile store does not expand an item that is already marked complete. If windows are
+    added, moved, or resized after ingestion, clear this layer's cached tile-store
+    entries and ingest it again. With the default tile store, remove the corresponding
+    layer (or layer alias) directory under `<dataset_path>/tiles/`. Then run the
+    following commands for the affected windows and layer:
+
+    ```bash
+    rslearn dataset prepare --root <dataset_path> --enabled-layers <layer_name> --force
+    rslearn dataset ingest --root <dataset_path> --enabled-layers <layer_name>
+    ```
+
+    Custom tile stores must be cleared through their configured backend.
 
 ### Configuration
 
