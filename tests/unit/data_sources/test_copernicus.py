@@ -16,12 +16,14 @@ from rslearn.const import WGS84_PROJECTION
 from rslearn.data_sources import DataSourceContext
 from rslearn.data_sources.copernicus import (
     CopernicusItem,
+    get_sentinel2_tiles,
+)
+from rslearn.data_sources.copernicus_sentinel3 import (
     Sentinel3OlciEFR,
     Sentinel3SlstrRBT,
     _crop_swath,
     _interpolate_tie_points,
     _interpolate_tie_points_xy,
-    get_sentinel2_tiles,
 )
 from rslearn.utils.geometry import STGeometry
 
@@ -231,7 +233,9 @@ class TestSentinel3:
         tile_store = MagicMock()
         tile_store.is_raster_ready.return_value = False
 
-        with patch("rslearn.data_sources.copernicus._write_swath") as write_swath:
+        with patch(
+            "rslearn.data_sources.copernicus_sentinel3._write_swath"
+        ) as write_swath:
             source._process_product_zip(tile_store, _test_item(), str(zip_path))
 
         assert write_swath.call_count == 1
@@ -331,7 +335,9 @@ class TestSentinel3:
         tile_store = MagicMock()
         tile_store.is_raster_ready.return_value = False
 
-        with patch("rslearn.data_sources.copernicus._write_swath") as write_swath:
+        with patch(
+            "rslearn.data_sources.copernicus_sentinel3._write_swath"
+        ) as write_swath:
             source._process_product_zip(tile_store, _test_item(), str(zip_path))
 
         assert write_swath.call_count == 2

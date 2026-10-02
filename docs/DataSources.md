@@ -37,8 +37,8 @@ detailed page with configuration options and available bands. See
 
 | Data Source | Provider | Notes |
 |---|---|---|
-| [copernicus.Sentinel3OlciEFR](data_sources/copernicus.md#rslearndata_sourcescopernicussentinel3olciefr) | ESA Copernicus Data Space | OLCI Level-1 EFR, 21 TOA reflectance bands, requires ingestion |
-| [copernicus.Sentinel3SlstrRBT](data_sources/copernicus.md#rslearndata_sourcescopernicussentinel3slstrrbt) | ESA Copernicus Data Space | SLSTR Level-1 RBT, S1-S6 reflectance and S7-S9 brightness temperature, requires ingestion |
+| [copernicus_sentinel3.Sentinel3OlciEFR](data_sources/copernicus.md#rslearndata_sourcescopernicus_sentinel3sentinel3olciefr) | ESA Copernicus Data Space | OLCI Level-1 EFR, 21 TOA reflectance bands, requires ingestion |
+| [copernicus_sentinel3.Sentinel3SlstrRBT](data_sources/copernicus.md#rslearndata_sourcescopernicus_sentinel3sentinel3slstrrbt) | ESA Copernicus Data Space | SLSTR Level-1 RBT, S1-S6 reflectance and S7-S9 brightness temperature, requires ingestion |
 | [planetary_computer.Sentinel3SlstrLST](data_sources/planetary_computer_Sentinel3SlstrLST.md) | Microsoft Planetary Computer | SLSTR Level-2 land-surface temperature, requires ingestion |
 
 #### Landsat

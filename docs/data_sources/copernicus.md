@@ -44,7 +44,7 @@ and how to get an access token.
 }
 ```
 
-## rslearn.data_sources.copernicus.Sentinel3OlciEFR
+## rslearn.data_sources.copernicus_sentinel3.Sentinel3OlciEFR
 
 This data source retrieves [Sentinel-3 OLCI Level-1](https://documentation.dataspace.copernicus.eu/Data/SentinelMissions/Sentinel3.html#sentinel-3-olci-level-1) Earth Observation Full Resolution
 (`OL_1_EFR___`) products from Copernicus Data Space. During ingestion it converts the
@@ -76,7 +76,7 @@ It requires the optional NetCDF/xarray/scipy dependencies included in
 
 ```jsonc
 {
-  "class_path": "rslearn.data_sources.copernicus.Sentinel3OlciEFR",
+  "class_path": "rslearn.data_sources.copernicus_sentinel3.Sentinel3OlciEFR",
   "init_args": {
     // Intermediate WGS84 grid resolution in degrees (approximately 300 m).
     "grid_resolution": 0.0027,
@@ -97,7 +97,7 @@ It requires the optional NetCDF/xarray/scipy dependencies included in
 
 - `Oa01_reflectance` through `Oa21_reflectance` (`float32`, unitless)
 
-## rslearn.data_sources.copernicus.Sentinel3SlstrRBT
+## rslearn.data_sources.copernicus_sentinel3.Sentinel3SlstrRBT
 
 This data source retrieves [Sentinel-3 SLSTR Level-1](https://documentation.dataspace.copernicus.eu/Data/SentinelMissions/Sentinel3.html#sentinel-3-slstr-level-1) Radiance and Brightness
 Temperature (`SL_1_RBT___`) products from Copernicus Data Space. It converts the
@@ -128,7 +128,7 @@ materialization resolutions. The source requires `rslearn[extra]` and ingestion.
 
 ```jsonc
 {
-  "class_path": "rslearn.data_sources.copernicus.Sentinel3SlstrRBT",
+  "class_path": "rslearn.data_sources.copernicus_sentinel3.Sentinel3SlstrRBT",
   "init_args": {
     // Intermediate WGS84 grids, approximately 500 m and 1 km respectively.
     "reflectance_grid_resolution": 0.0045,

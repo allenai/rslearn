@@ -21,6 +21,8 @@ from rslearn.data_sources.copernicus import (
     Sentinel1ProductType,
     Sentinel2,
     Sentinel2ProductType,
+)
+from rslearn.data_sources.copernicus_sentinel3 import (
     Sentinel3OlciEFR,
     Sentinel3SlstrRBT,
 )
