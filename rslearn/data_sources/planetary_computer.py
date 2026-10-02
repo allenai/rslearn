@@ -915,7 +915,6 @@ class Sentinel3SlstrLST(PlanetaryComputer):
 
     def __init__(
         self,
-        sample_step: int = 20,
         nodata_value: float = 0.0,
         grid_resolution: float | None = None,
         context: DataSourceContext = DataSourceContext(),
@@ -924,15 +923,12 @@ class Sentinel3SlstrLST(PlanetaryComputer):
         """Initialize a new Sentinel3SlstrLST instance.
 
         Args:
-            sample_step: stride (in pixels) for sampling the geodetic arrays when
-                estimating grid resolution.
             nodata_value: value to use for missing data in the output GeoTIFF.
             grid_resolution: optional output grid resolution (degrees). If not set,
                 it is estimated from the geodetic arrays.
             context: the data source context.
             kwargs: additional arguments to pass to PlanetaryComputer.
         """
-        self.sample_step = max(1, sample_step)
         self.nodata_value = nodata_value
         self.grid_resolution = grid_resolution
 
@@ -966,11 +962,8 @@ class Sentinel3SlstrLST(PlanetaryComputer):
             raise ValueError(
                 f"expected lon/lat arrays to have same shape, got {lons.shape} and {lats.shape}"
             )
-        step = max(1, self.sample_step)
-        # Subsample only the orthogonal axis so each difference is between adjacent
-        # pixels; striding both axes would measure spacing across `step` pixels.
-        lon_diff = np.abs(np.diff(lons[::step, :], axis=1)).ravel()
-        lat_diff = np.abs(np.diff(lats[:, ::step], axis=0)).ravel()
+        lon_diff = np.abs(np.diff(lons, axis=1)).ravel()
+        lat_diff = np.abs(np.diff(lats, axis=0)).ravel()
         diffs = np.concatenate([lon_diff, lat_diff])
         diffs = diffs[np.isfinite(diffs) & (diffs > 0)]
         if diffs.size == 0:

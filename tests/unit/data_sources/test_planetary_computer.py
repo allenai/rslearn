@@ -274,10 +274,8 @@ def test_sentinel3_slstr_lst_rejects_non_lst_band_in_context() -> None:
         Sentinel3SlstrLST(context=context)
 
 
-@pytest.mark.parametrize("sample_step", [1, 20])
-def test_sentinel3_slstr_lst_estimates_pixel_spacing(sample_step: int) -> None:
-    # Regular 0.01-degree swath: the estimate must be the adjacent-pixel spacing
-    # regardless of how sparsely the geodetic arrays are sampled.
+def test_sentinel3_slstr_lst_estimates_pixel_spacing() -> None:
+    # Regular 0.01-degree swath: the estimate must be the adjacent-pixel spacing.
     lons, lats = np.meshgrid(10 + 0.01 * np.arange(200), 59 + 0.01 * np.arange(100))
-    data_source = Sentinel3SlstrLST(sample_step=sample_step)
+    data_source = Sentinel3SlstrLST()
     assert data_source._estimate_grid_resolution(lons, lats) == pytest.approx(0.01)
