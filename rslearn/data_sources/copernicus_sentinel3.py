@@ -77,32 +77,17 @@ def _requested_bands(
 def _interpolate_tie_points(
     tie_values: npt.NDArray, target_shape: tuple[int, int]
 ) -> npt.NDArray[np.float32]:
-    """Bilinearly interpolate a regular tie-point array to an image grid."""
-    values = np.asarray(tie_values, dtype=np.float32)
+    """Bilinearly interpolate a tie-point array whose corners align with the image."""
+    values = np.asarray(tie_values, dtype=np.float64)
     if values.ndim != 2:
         raise ValueError(f"expected a 2D tie-point array, got shape {values.shape}")
-    if values.shape == target_shape:
-        return values.copy()
 
-    src_rows = np.linspace(0.0, 1.0, values.shape[0], dtype=np.float64)
-    src_cols = np.linspace(0.0, 1.0, values.shape[1], dtype=np.float64)
-    dst_rows = np.linspace(0.0, 1.0, target_shape[0], dtype=np.float64)
-    dst_cols = np.linspace(0.0, 1.0, target_shape[1], dtype=np.float64)
-
-    row_interpolated = np.empty((target_shape[0], values.shape[1]), dtype=np.float32)
-    for col_idx in range(values.shape[1]):
-        row_interpolated[:, col_idx] = np.interp(
-            dst_rows, src_rows, values[:, col_idx].astype(np.float64)
-        )
-
-    result = np.empty(target_shape, dtype=np.float32)
-    for row_idx in range(target_shape[0]):
-        result[row_idx, :] = np.interp(
-            dst_cols,
-            src_cols,
-            row_interpolated[row_idx, :].astype(np.float64),
-        )
-    return result
+    tie_rows = np.linspace(0, target_shape[0] - 1, values.shape[0])
+    tie_cols = np.linspace(0, target_shape[1] - 1, values.shape[1])
+    interpolator = RegularGridInterpolator((tie_rows, tie_cols), values)
+    rows = np.arange(target_shape[0])[:, None]
+    cols = np.arange(target_shape[1])[None, :]
+    return interpolator((rows, cols)).astype(np.float32)
 
 
 def _interpolate_tie_points_xy(
