@@ -514,6 +514,22 @@ data:
       # see example above
 ```
 
+#### PerPixelTimestepTask
+
+PerPixelTimestepTask is a specialized SegmentationTask that trains the model to predict
+one of the input timesteps at each pixel, e.g. the timestep at which a change occurred.
+The prediction is written as the date of that image timestep, as uint16 days since
+1970-01-01 (0 = nodata). See the
+[TokensToChannels](models/TokensToChannels.md) example.
+
+```yaml
+    task:
+      class_path: rslearn.train.tasks.per_pixel_timestep.PerPixelTimestepTask
+      init_args:
+        # The number of input timesteps.
+        num_classes: 12
+```
+
 ## Models
 
 ### Introduction
@@ -768,6 +784,7 @@ with the configured task, along with the loss.
 | [RegressionHead](models/RegressionHead.md) | [RegressionTask](#regressiontask) | FeatureVector of predicted values |
 | [PerPixelRegressionHead](models/PerPixelRegressionHead.md) | [PerPixelRegressionTask](#perpixelregressiontask) | FeatureMaps with one map of per-pixel predicted values |
 | [SegmentationHead](models/SegmentationHead.md) | [SegmentationTask](#segmentationtask) | FeatureMaps with one map of per-pixel logits |
+| [PerPixelTimestepHead](models/PerPixelTimestepHead.md) | [PerPixelTimestepTask](#perpixeltimesteptask) | FeatureMaps with one map of per-pixel logits, one per input timestep |
 
 Object detection with [DetectionTask](#detectiontask) uses
 `rslearn.models.faster_rcnn.FasterRCNN` as the predictor; see the DetectionTask example

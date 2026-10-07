@@ -13,9 +13,9 @@ correspond to token `n`.
 With `out_dim: 1` (the default), this turns per-timestep tokens into one logit per
 timestep at each location. This is useful for predicting the timestep at which an
 event occurred as an N-way classification at each pixel: the output feature map can be
-passed directly to [SegmentationHead](SegmentationHead.md) with a
-[SegmentationTask](../TasksAndModels.md#segmentationtask) that has `num_classes` equal
-to the number of timesteps.
+passed directly to [PerPixelTimestepHead](PerPixelTimestepHead.md) with a
+[PerPixelTimestepTask](../TasksAndModels.md#perpixeltimesteptask) that has `num_classes`
+equal to the number of timesteps.
 
 If the input TokenFeatureMaps has masks, the output shape is unchanged, but the
 `out_dim` channels corresponding to each invalid token are overwritten with
@@ -42,7 +42,9 @@ never predicted.
 
 This example predicts, at each pixel, the month in which a change occurred, given a
 year of monthly Sentinel-2 mosaics. The label raster contains the index of the month
-(0 to 11) at pixels where a change occurred, and 255 elsewhere.
+(0 to 11) at pixels where a change occurred, and 255 elsewhere. At prediction time, the
+output is the date (days since 1970-01-01) of the predicted month's mosaic rather than
+its index.
 
 The [OlmoEarth](../foundation_models/OlmoEarth.md) encoder is configured with
 `token_pooling: false`, so instead of pooling over timesteps it outputs a
@@ -60,8 +62,11 @@ padded tokens invalid in the TokenFeatureMaps mask; TokensToChannels then writes
 `mask_fill_value` into the corresponding output channels.
 
 TokensToChannels produces a `B x 12 x (H/4) x (W/4)` feature map (12 monthly logits at
-each patch), which we upsample to the input resolution before SegmentationHead
-computes the cross entropy loss against the month index.
+each patch), which we upsample to the input resolution before PerPixelTimestepHead
+computes the cross entropy loss against the month index. PerPixelTimestepHead also
+attaches the timestamps of the `sentinel2_l2a` input, which PerPixelTimestepTask uses
+to write the predicted month as the number of days since 1970-01-01, so the output
+layer's band set should use the uint16 dtype.
 
 ```yaml
 model:
@@ -92,7 +97,10 @@ model:
             init_args:
               scale_factor: 4
               mode: "bilinear"
-          - class_path: rslearn.train.tasks.segmentation.SegmentationHead
+          - class_path: rslearn.train.tasks.per_pixel_timestep.PerPixelTimestepHead
+            init_args:
+              # The logit channels correspond to the timesteps of this input.
+              input_key: sentinel2_l2a
     optimizer:
       class_path: rslearn.models.olmoearth_pretrain.optimizer.LayerDecayAdamW
       init_args:
@@ -116,7 +124,7 @@ data:
         dtype: INT32
         is_target: true
     task:
-      class_path: rslearn.train.tasks.segmentation.SegmentationTask
+      class_path: rslearn.train.tasks.per_pixel_timestep.PerPixelTimestepTask
       init_args:
         # One class per timestep.
         num_classes: 12

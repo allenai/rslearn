@@ -20,6 +20,5 @@ dict with one key, "cls", containing the softmax cross entropy loss.
 ### Example
 
 See the [SegmentationTask](../TasksAndModels.md#segmentationtask) example, which pairs
-SegmentationHead with a UNetDecoder. The [TokensToChannels](TokensToChannels.md) and
-[BreakpointScan](BreakpointScan.md) pages have examples of using SegmentationHead with
-per-timestep tokens from OlmoEarth.
+SegmentationHead with a UNetDecoder. The [BreakpointScan](BreakpointScan.md) page has
+an example of using SegmentationHead with per-timestep tokens from OlmoEarth.

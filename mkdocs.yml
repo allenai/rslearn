@@ -191,4 +191,5 @@ nav:
               - models/RegressionHead.md
               - models/PerPixelRegressionHead.md
               - models/SegmentationHead.md
+              - models/PerPixelTimestepHead.md
   - API Reference: reference/
