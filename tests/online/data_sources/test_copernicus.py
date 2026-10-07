@@ -1,9 +1,11 @@
 """Test rslearn.data_sources.copernicus."""
 
 import pathlib
+from datetime import UTC, datetime
 
 import numpy as np
 import pytest
+import shapely
 from rasterio.enums import Resampling
 from upath import UPath
 
@@ -11,6 +13,7 @@ from rslearn.config import (
     QueryConfig,
     SpaceMode,
 )
+from rslearn.const import WGS84_PROJECTION
 from rslearn.data_sources.copernicus import (
     Copernicus,
     Sentinel1,
@@ -18,6 +21,10 @@ from rslearn.data_sources.copernicus import (
     Sentinel1ProductType,
     Sentinel2,
     Sentinel2ProductType,
+)
+from rslearn.data_sources.copernicus_sentinel3 import (
+    Sentinel3OlciEFR,
+    Sentinel3SlstrRBT,
 )
 from rslearn.log_utils import get_logger
 from rslearn.tile_stores import DefaultTileStore, TileStoreWithLayer
@@ -156,3 +163,33 @@ class TestSentinel1:
         )
         assert tile_store.is_raster_ready(layer_name, item, ["vv"])
         assert tile_store.is_raster_ready(layer_name, item, ["vh"])
+
+
+class TestSentinel3:
+    """Online catalogue tests for Sentinel-3 Level-1 sources."""
+
+    @pytest.mark.parametrize(
+        "source",
+        [
+            Sentinel3OlciEFR(band_names=["Oa01_reflectance"], access_token="unused"),
+            Sentinel3SlstrRBT(band_names=["S1_reflectance"], access_token="unused"),
+        ],
+    )
+    def test_catalogue_search(
+        self, source: Sentinel3OlciEFR | Sentinel3SlstrRBT
+    ) -> None:
+        """Verify exact OLCI/SLSTR filters against the public CDSE catalogue."""
+        geometry = STGeometry(
+            WGS84_PROJECTION,
+            shapely.box(12.35, 41.8, 12.65, 42.02),
+            (
+                datetime(2024, 4, 24, tzinfo=UTC),
+                datetime(2024, 4, 30, 23, 59, 59, tzinfo=UTC),
+            ),
+        )
+        item_groups = source.get_items(
+            [geometry], QueryConfig(space_mode=SpaceMode.INTERSECTS)
+        )[0]
+        assert item_groups
+        assert item_groups[0].items
+        assert source.PRODUCT_TYPE in item_groups[0].items[0].name
