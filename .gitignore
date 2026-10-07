@@ -7,3 +7,4 @@ rslearn.egg-info
 .cursor/
 .claude/
 site/
+*.pyc
