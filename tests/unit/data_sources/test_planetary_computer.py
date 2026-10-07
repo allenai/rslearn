@@ -2,6 +2,7 @@ from datetime import datetime
 from typing import cast
 from unittest.mock import patch
 
+import numpy as np
 import pytest
 
 from rslearn.config import BandSetConfig, DType, LayerConfig, LayerType
@@ -271,3 +272,10 @@ def test_sentinel3_slstr_lst_rejects_non_lst_band_in_context() -> None:
 
     with pytest.raises(ValueError, match="only supports the LST band"):
         Sentinel3SlstrLST(context=context)
+
+
+def test_sentinel3_slstr_lst_estimates_pixel_spacing() -> None:
+    # Regular 0.01-degree swath: the estimate must be the adjacent-pixel spacing.
+    lons, lats = np.meshgrid(10 + 0.01 * np.arange(200), 59 + 0.01 * np.arange(100))
+    data_source = Sentinel3SlstrLST()
+    assert data_source._estimate_grid_resolution(lons, lats) == pytest.approx(0.01)

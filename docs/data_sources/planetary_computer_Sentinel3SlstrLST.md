@@ -14,8 +14,6 @@ workflow).
 {
   "class_path": "rslearn.data_sources.planetary_computer.Sentinel3SlstrLST",
   "init_args": {
-    // Stride for sampling geolocation arrays when estimating grid resolution.
-    "sample_step": 20,
     // Nodata value used for missing pixels (default 0.0).
     "nodata_value": 0.0,
     // Optional output grid resolution in degrees. If omitted, estimate from geodetic arrays.
