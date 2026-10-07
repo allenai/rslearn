@@ -16,8 +16,8 @@ For each example, the output is a dict with:
 - "probs": the `C x H x W` softmax probabilities.
 - "timestamps": an int64 tensor with the number of days since 1970-01-01 (UTC) of the
   midpoint of each input timestep's time range. The timestamps must be timezone-aware,
-  and the midpoints must fall between 1970-01-01 and 2149-06-06 so that they fit in
-  the uint16 output of PerPixelTimestepTask.
+  and the midpoints must fall between 1970-01-01 and 2149-06-05 so that they fit in
+  the uint16 output of PerPixelTimestepTask (65535 is reserved for nodata).
 
 The input must be a RasterImage with timestamps, with at most as many timesteps as
 logit channels. Additional channels (e.g. from padding tokens) are ignored by

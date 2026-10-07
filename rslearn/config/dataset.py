@@ -191,7 +191,9 @@ class BandSetConfig(BaseModel):
     nodata_value: int | float | None = Field(
         default=None,
         description="Optional nodata value for this band set. Used during materialization "
-        "to determine which pixels are invalid when creating mosaics.",
+        "to determine which pixels are invalid when creating mosaics. For prediction "
+        "output layers, it is written as the raster's nodata value (e.g. the GeoTIFF "
+        "nodata tag) and used to fill pixels not covered by any prediction.",
     )
 
     # Optional explicit spatial dimensions for the materialized output. When set,

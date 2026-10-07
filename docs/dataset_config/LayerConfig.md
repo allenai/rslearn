@@ -110,6 +110,11 @@ Raster layers have additional configuration:
       },
       // Optional zoom offset (default 0).
       "zoom_offset": 0,
+      // Optional nodata value (default null). During materialization, it determines
+      // which pixels are invalid when creating mosaics. For prediction output layers,
+      // it is written as the raster's nodata value (e.g. the GeoTIFF nodata tag) and
+      // fills pixels not covered by any prediction.
+      "nodata_value": null,
       // Optional remap configuration for remapping pixel values during
       // materialization (default is to not perform any remapping).
       "remap": null,

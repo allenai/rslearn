@@ -66,7 +66,7 @@ each patch), which we upsample to the input resolution before PerPixelTimestepHe
 computes the cross entropy loss against the month index. PerPixelTimestepHead also
 attaches the timestamps of the `sentinel2_l2a` input, which PerPixelTimestepTask uses
 to write the predicted month as the number of days since 1970-01-01, so the output
-layer's band set should use the uint16 dtype.
+layer's band set should use the uint16 dtype with `nodata_value: 65535`.
 
 ```yaml
 model:

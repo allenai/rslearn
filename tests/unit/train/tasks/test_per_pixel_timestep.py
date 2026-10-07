@@ -45,10 +45,11 @@ def test_head_attaches_midpoint_timestamps() -> None:
 
 
 def test_head_rejects_dates_outside_uint16_days() -> None:
-    """Midpoints before 1970 or after 2149-06-06 cannot be written as uint16 days."""
+    """Midpoints before 1970 or after 2149-06-05 cannot be written as uint16 days."""
     head = PerPixelTimestepHead(input_key=INPUT_KEY)
     feature_maps = FeatureMaps([torch.zeros((1, 1, 2, 2))])
-    for day in [datetime(1969, 12, 31, tzinfo=UTC), datetime(2149, 6, 7, tzinfo=UTC)]:
+    # 2149-06-06 is day 65535, which is reserved for nodata.
+    for day in [datetime(1969, 12, 31, tzinfo=UTC), datetime(2149, 6, 6, tzinfo=UTC)]:
         with pytest.raises(ValueError, match="uint16"):
             head(feature_maps, _context([(day, day + timedelta(hours=1))]))
 
@@ -84,6 +85,21 @@ def test_task_outputs_argmax_timestamp(
     assert result.dtype == np.uint16
     expected = np.array([[MIDPOINT_DAYS[0]] * 2, [MIDPOINT_DAYS[1]] * 2])
     np.testing.assert_array_equal(result, expected[None])
+
+
+def test_task_outputs_nodata_without_timesteps(
+    empty_sample_metadata: SampleMetadata,
+) -> None:
+    """Without any input timesteps, every pixel should be nodata (65535)."""
+    raw_output = {
+        "probs": torch.zeros((2, 3, 4)),
+        "timestamps": torch.tensor([], dtype=torch.int64),
+    }
+    task = PerPixelTimestepTask(num_classes=2)
+    result = task.process_output(raw_output, empty_sample_metadata)
+
+    assert result.dtype == np.uint16
+    np.testing.assert_array_equal(result, np.full((1, 3, 4), 65535))
 
 
 def test_metrics_with_multi_task() -> None:

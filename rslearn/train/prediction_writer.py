@@ -31,7 +31,7 @@ from rslearn.train.model_context import SampleMetadata
 from rslearn.utils.array import copy_spatial_array
 from rslearn.utils.feature import Feature
 from rslearn.utils.geometry import PixelBounds
-from rslearn.utils.raster_array import RasterArray
+from rslearn.utils.raster_array import RasterArray, RasterMetadata
 from rslearn.utils.raster_format import (
     RasterFormat,
     adjust_projection_and_bounds_for_array,
@@ -133,12 +133,14 @@ class RasterMerger(CropPredictionMerger):
     ) -> npt.NDArray:
         """Merge the raster outputs."""
         num_channels = outputs[0].output.shape[0]
-        merged_image = np.zeros(
+        nodata_value = layer_config.band_sets[0].nodata_value
+        merged_image = np.full(
             (
                 num_channels,
                 (window.bounds[3] - window.bounds[1]) // self.downsample_factor,
                 (window.bounds[2] - window.bounds[0]) // self.downsample_factor,
             ),
+            nodata_value if nodata_value is not None else 0,
             dtype=layer_config.band_sets[0].dtype.get_numpy_dtype(),
         )
 
@@ -514,7 +516,12 @@ class RslearnWriter(BasePredictionWriter):
                 projection, bounds = adjust_projection_and_bounds_for_array(
                     window.projection, window.bounds, merged_output
                 )
-                raster = RasterArray(chw_array=merged_output)
+                raster = RasterArray(
+                    chw_array=merged_output,
+                    metadata=RasterMetadata(
+                        nodata_value=self.layer_config.band_sets[0].nodata_value
+                    ),
+                )
                 writer.write_raster(
                     self.layer_config.band_sets[0].bands,
                     self.format,

@@ -27,10 +27,10 @@ from .segmentation import SegmentationHead, SegmentationTask
 UNIX_EPOCH = datetime(1970, 1, 1, tzinfo=UTC)
 
 # Value written for pixels without a prediction.
-TIMESTAMP_NODATA_VALUE = 0
+TIMESTAMP_NODATA_VALUE = np.iinfo(np.uint16).max
 
-# Largest day that fits in the uint16 output (2149-06-06).
-MAX_DAYS = np.iinfo(np.uint16).max
+# Largest day that can be written without colliding with nodata (2149-06-05).
+MAX_DAYS = TIMESTAMP_NODATA_VALUE - 1
 
 
 def _midpoint_days(time_range: tuple[datetime, datetime]) -> int:
@@ -129,7 +129,9 @@ class PerPixelTimestepTask(SegmentationTask):
 
     At prediction time, the per-pixel argmax timestep is mapped to the number of days
     since 1970-01-01 (UTC) of the midpoint of that input image's time range, so the
-    output layer's band set should use the uint16 dtype. 0 is used as the nodata value.
+    output layer's band set should use the uint16 dtype. 65535 (2^16 - 1) is used as
+    the nodata value; set nodata_value: 65535 on the output band set so that the
+    written raster is tagged with it.
     """
 
     def __init__(self, **kwargs: Any) -> None:
