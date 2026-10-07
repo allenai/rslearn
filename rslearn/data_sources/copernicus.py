@@ -283,8 +283,8 @@ class Copernicus(DataSource):
             if "COPERNICUS_ACCESS_TOKEN" in os.environ:
                 self.access_token = os.environ["COPERNICUS_ACCESS_TOKEN"]
             else:
-                self.username = os.environ["COPERNICUS_USERNAME"]
-                self.password = os.environ["COPERNICUS_PASSWORD"]
+                self.username = os.environ.get("COPERNICUS_USERNAME")
+                self.password = os.environ.get("COPERNICUS_PASSWORD")
 
     def deserialize_item(self, serialized_item: dict) -> CopernicusItem:
         """Deserializes an item from JSON-decoded data."""
@@ -476,6 +476,13 @@ class Copernicus(DataSource):
         if self.access_token is not None:
             return self.access_token
 
+        if self.username is None or self.password is None:
+            raise ValueError(
+                "Copernicus product downloads require authentication. Set "
+                "COPERNICUS_ACCESS_TOKEN, or set both COPERNICUS_USERNAME and "
+                "COPERNICUS_PASSWORD. Catalogue searches do not require credentials."
+            )
+
         response = requests.post(
             self.TOKEN_URL,
             data={
@@ -486,7 +493,11 @@ class Copernicus(DataSource):
             },
             timeout=self.timeout,
         )
-        return response.json()["access_token"]
+        response.raise_for_status()
+        token = response.json().get("access_token")
+        if not token:
+            raise ApiError("Copernicus token response did not contain an access token")
+        return str(token)
 
     def _zip_member_glob(self, member_names: list[str], pattern: str) -> str:
         """Pick the zip member name that matches the given pattern.
@@ -507,7 +518,11 @@ class Copernicus(DataSource):
         raise ValueError(f"no zip member matching {pattern}")
 
     def _process_product_zip(
-        self, tile_store: TileStoreWithLayer, item: CopernicusItem, local_zip_fname: str
+        self,
+        tile_store: TileStoreWithLayer,
+        item: CopernicusItem,
+        local_zip_fname: str,
+        geometries: list[STGeometry] | None = None,
     ) -> None:
         """Ingest rasters in the specified product zip file.
 
@@ -516,6 +531,8 @@ class Copernicus(DataSource):
             item: the item to download and ingest.
             local_zip_fname: the local filename where the product zip file has been
                 downloaded.
+            geometries: geometries that need this item, if the processor can use them
+                to limit work.
         """
         with ZipFile(local_zip_fname) as zipf:
             member_names = zipf.namelist()
@@ -554,7 +571,7 @@ class Copernicus(DataSource):
             items: the items to ingest
             geometries: a list of geometries needed for each item
         """
-        for item in items:
+        for item, item_geometries in zip(items, geometries, strict=True):
             # The product zip file is one big download, so we download it if any raster
             # hasn't been ingested yet.
             any_rasters_needed = False
@@ -595,7 +612,9 @@ class Copernicus(DataSource):
                         f.write(chunk)
 
                 # Process each raster we need from the zip file.
-                self._process_product_zip(tile_store, item, local_zip_fname)
+                self._process_product_zip(
+                    tile_store, item, local_zip_fname, item_geometries
+                )
 
 
 class Sentinel2ProductType(StrEnum):
@@ -730,7 +749,11 @@ class Sentinel2(Copernicus):
 
     # Override to support harmonization step.
     def _process_product_zip(
-        self, tile_store: TileStoreWithLayer, item: CopernicusItem, local_zip_fname: str
+        self,
+        tile_store: TileStoreWithLayer,
+        item: CopernicusItem,
+        local_zip_fname: str,
+        geometries: list[STGeometry] | None = None,
     ) -> None:
         """Ingest rasters in the specified product zip file.
 
@@ -739,6 +762,7 @@ class Sentinel2(Copernicus):
             item: the item to download and ingest.
             local_zip_fname: the local filename where the product zip file has been
                 downloaded.
+            geometries: geometries that need this item; unused for Sentinel-2.
         """
         with ZipFile(local_zip_fname) as zipf:
             member_names = zipf.namelist()
