@@ -138,12 +138,14 @@ class PerPixelTimestepTask(SegmentationTask):
         """Create a new PerPixelTimestepTask.
 
         Args:
-            kwargs: arguments to pass to SegmentationTask. output_probs is not
-                supported.
+            kwargs: arguments to pass to SegmentationTask. output_probs and
+                prob_scales are not supported.
         """
         super().__init__(**kwargs)
         if self.output_probs:
             raise ValueError("PerPixelTimestepTask does not support output_probs")
+        if self.prob_scales is not None:
+            raise ValueError("PerPixelTimestepTask does not support prob_scales")
 
     def process_output(
         self, raw_output: Any, metadata: SampleMetadata
