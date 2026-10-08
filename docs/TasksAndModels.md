@@ -514,6 +514,33 @@ data:
       # see example above
 ```
 
+#### PerPixelTimestepTask
+
+PerPixelTimestepTask is a specialized SegmentationTask that trains the model to predict
+one of the input timesteps at each pixel, e.g. the timestep at which a change occurred.
+Both the labels and the predictions are dates rather than timestep indices, so they do
+not depend on which images the model was given.
+
+The target raster contains the labeled date at each pixel as days since 1970-01-01
+(UTC), with 65535 at unlabeled pixels; read it with an integer dtype that can hold
+65535, e.g. `INT32`. It must be paired with
+[PerPixelTimestepHead](models/PerPixelTimestepHead.md), whose `mode` controls how each
+labeled date is mapped to an input timestep for the loss and metrics. `nodata_value`,
+`zero_is_invalid`, and `class_id_mapping` are not supported.
+
+The prediction is written as the date of the predicted image timestep, as uint16 days
+since 1970-01-01 (65535 = nodata). Set `nodata_value: 65535` on the output layer's band
+set so that the written GeoTIFF is tagged with it. See the
+[TokensToChannels](models/TokensToChannels.md) example.
+
+```yaml
+    task:
+      class_path: rslearn.train.tasks.per_pixel_timestep.PerPixelTimestepTask
+      init_args:
+        # The number of input timesteps.
+        num_classes: 12
+```
+
 ## Models
 
 ### Introduction
@@ -768,6 +795,7 @@ with the configured task, along with the loss.
 | [RegressionHead](models/RegressionHead.md) | [RegressionTask](#regressiontask) | FeatureVector of predicted values |
 | [PerPixelRegressionHead](models/PerPixelRegressionHead.md) | [PerPixelRegressionTask](#perpixelregressiontask) | FeatureMaps with one map of per-pixel predicted values |
 | [SegmentationHead](models/SegmentationHead.md) | [SegmentationTask](#segmentationtask) | FeatureMaps with one map of per-pixel logits |
+| [PerPixelTimestepHead](models/PerPixelTimestepHead.md) | [PerPixelTimestepTask](#perpixeltimesteptask) | FeatureMaps with one map of per-pixel logits, one per input timestep |
 
 Object detection with [DetectionTask](#detectiontask) uses
 `rslearn.models.faster_rcnn.FasterRCNN` as the predictor; see the DetectionTask example

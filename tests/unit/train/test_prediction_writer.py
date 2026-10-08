@@ -7,6 +7,7 @@ from unittest.mock import Mock
 
 import numpy as np
 import numpy.typing as npt
+import rasterio
 import torch
 from lightning.pytorch import Trainer
 from torchmetrics import MetricCollection
@@ -227,6 +228,39 @@ class TestRasterMerger:
         )
         assert merged.shape == (1, 4, 4)
         assert merged.dtype == np.uint16
+
+    def test_merge_fills_nodata(self, tmp_path: pathlib.Path) -> None:
+        """Pixels not covered by any crop should get the band set's nodata value."""
+        window = Window(
+            storage=FileWindowStorage(tmp_path),
+            group="fake",
+            name="fake",
+            projection=WGS84_PROJECTION,
+            bounds=(0, 0, 4, 4),
+            time_range=None,
+            data_factory=PerItemGroupStorageFactory(),
+        )
+        outputs = [
+            PendingCropOutput(
+                bounds=(0, 0, 2, 2),
+                output=np.ones((1, 2, 2), dtype=np.uint16),
+            ),
+        ]
+        merged = RasterMerger().merge(
+            window,
+            outputs,
+            LayerConfig(
+                type=LayerType.RASTER,
+                band_sets=[
+                    BandSetConfig(
+                        bands=["output"], dtype=DType.UINT16, nodata_value=65535
+                    )
+                ],
+            ),
+        )
+        assert np.all(merged[0, 0:2, 0:2] == 1)
+        merged[0, 0:2, 0:2] = 65535
+        assert np.all(merged == 65535)
 
 
 def test_write_raster(tmp_path: pathlib.Path) -> None:
@@ -516,6 +550,66 @@ def test_write_raster_with_layer_config(tmp_path: pathlib.Path) -> None:
         GeotiffRasterFormat(),
     )
     assert raster.get_chw_array().shape[0] == len(output_bands)
+
+
+def test_write_raster_with_nodata_value(tmp_path: pathlib.Path) -> None:
+    """The band set's nodata_value should be written as the GeoTIFF nodata tag."""
+    output_layer_name = "output"
+    layer_config = LayerConfig(
+        type=LayerType.RASTER,
+        band_sets=[
+            BandSetConfig(
+                dtype=DType.UINT16,
+                bands=["value"],
+                nodata_value=65535,
+            )
+        ],
+    )
+    output_path = UPath(tmp_path / "out")
+    output_path.mkdir()
+
+    pl_module = RslearnLightningModule(
+        model=torch.nn.Identity(),
+        task=SegmentationTask(num_classes=2),
+    )
+    writer = RslearnWriter(
+        path=str(tmp_path),
+        output_layer=output_layer_name,
+        layer_config=layer_config,
+        storage_config=StorageConfig(),
+        output_path=str(output_path),
+    )
+    metadata = SampleMetadata(
+        window_group="default",
+        window_name="default",
+        window_bounds=(0, 0, 4, 4),
+        crop_bounds=(0, 0, 4, 4),
+        crop_idx=0,
+        num_crops_in_window=1,
+        time_range=None,
+        projection=Projection(WGS84_PROJECTION.crs, 0.2, 0.2),
+        dataset_source=None,
+    )
+    mock_trainer = Mock(spec=Trainer)
+    mock_trainer.datamodule = Mock()
+    mock_trainer.datamodule.path = UPath(tmp_path)
+    writer.setup(mock_trainer, pl_module, stage="predict")
+    writer.write_on_batch_end(
+        trainer=mock_trainer,
+        pl_module=pl_module,
+        prediction=ModelOutput(
+            outputs=[torch.zeros((2, 4, 4), dtype=torch.float32)], loss_dict={}
+        ),
+        batch_indices=[0],
+        batch=([None], [None], [metadata]),
+        batch_idx=0,
+        dataloader_idx=0,
+    )
+
+    (tif_path,) = list(pathlib.Path(output_path).rglob("*.tif"))
+    with rasterio.open(tif_path) as src:
+        assert src.dtypes[0] == "uint16"
+        assert src.nodata == 65535
 
 
 def test_selector_with_dictionary_output(tmp_path: pathlib.Path) -> None:
