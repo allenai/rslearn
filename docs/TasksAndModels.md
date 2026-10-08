@@ -518,9 +518,19 @@ data:
 
 PerPixelTimestepTask is a specialized SegmentationTask that trains the model to predict
 one of the input timesteps at each pixel, e.g. the timestep at which a change occurred.
-The prediction is written as the date of that image timestep, as uint16 days since
-1970-01-01 (65535 = nodata). Set `nodata_value: 65535` on the output layer's band set
-so that the written GeoTIFF is tagged with it. See the
+Both the labels and the predictions are dates rather than timestep indices, so they do
+not depend on which images the model was given.
+
+The target raster contains the labeled date at each pixel as days since 1970-01-01
+(UTC), with 65535 at unlabeled pixels; read it with an integer dtype that can hold
+65535, e.g. `INT32`. It must be paired with
+[PerPixelTimestepHead](models/PerPixelTimestepHead.md), whose `mode` controls how each
+labeled date is mapped to an input timestep for the loss and metrics. `nodata_value`,
+`zero_is_invalid`, and `class_id_mapping` are not supported.
+
+The prediction is written as the date of the predicted image timestep, as uint16 days
+since 1970-01-01 (65535 = nodata). Set `nodata_value: 65535` on the output layer's band
+set so that the written GeoTIFF is tagged with it. See the
 [TokensToChannels](models/TokensToChannels.md) example.
 
 ```yaml

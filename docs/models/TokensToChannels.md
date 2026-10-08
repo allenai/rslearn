@@ -40,11 +40,11 @@ never predicted.
 
 ### Example
 
-This example predicts, at each pixel, the month in which a change occurred, given a
-year of monthly Sentinel-2 mosaics. The label raster contains the index of the month
-(0 to 11) at pixels where a change occurred, and 255 elsewhere. At prediction time, the
-output is the date (days since 1970-01-01) of the predicted month's mosaic rather than
-its index.
+This example predicts, at each pixel, the first monthly mosaic after a change occurred,
+given a year of monthly Sentinel-2 mosaics. The label raster contains the date of the
+change as days since 1970-01-01 at pixels where a change occurred, and 65535
+elsewhere. At prediction time, the output is the date (days since 1970-01-01) of the
+predicted month's mosaic rather than its index.
 
 The [OlmoEarth](../foundation_models/OlmoEarth.md) encoder is configured with
 `token_pooling: false`, so instead of pooling over timesteps it outputs a
@@ -62,11 +62,12 @@ padded tokens invalid in the TokenFeatureMaps mask; TokensToChannels then writes
 `mask_fill_value` into the corresponding output channels.
 
 TokensToChannels produces a `B x 12 x (H/4) x (W/4)` feature map (12 monthly logits at
-each patch), which we upsample to the input resolution before PerPixelTimestepHead
-computes the cross entropy loss against the month index. PerPixelTimestepHead also
-attaches the timestamps of the `sentinel2_l2a` input, which PerPixelTimestepTask uses
-to write the predicted month as the number of days since 1970-01-01, so the output
-layer's band set should use the uint16 dtype with `nodata_value: 65535`.
+each patch), which we upsample to the input resolution. PerPixelTimestepHead uses the
+timestamps of the `sentinel2_l2a` input to map each labeled change date to the
+earliest mosaic on or after it (`mode: AFTER`), and computes the cross entropy loss
+against that month index. PerPixelTimestepTask also uses those timestamps to write the
+predicted month as the number of days since 1970-01-01, so the output layer's band set
+should use the uint16 dtype with `nodata_value: 65535`.
 
 ```yaml
 model:
@@ -101,6 +102,8 @@ model:
             init_args:
               # The logit channels correspond to the timesteps of this input.
               input_key: sentinel2_l2a
+              # The target is the earliest mosaic on or after the labeled date.
+              mode: AFTER
     optimizer:
       class_path: rslearn.models.olmoearth_pretrain.optimizer.LayerDecayAdamW
       init_args:
@@ -120,7 +123,9 @@ data:
       targets:
         data_type: "raster"
         layers: ["label"]
-        bands: ["change_month"]
+        # Days since 1970-01-01 of the change, or 65535 where no change occurred
+        # (these pixels are excluded from the loss).
+        bands: ["change_date"]
         dtype: INT32
         is_target: true
     task:
@@ -128,8 +133,6 @@ data:
       init_args:
         # One class per timestep.
         num_classes: 12
-        # Pixels where no change occurred are excluded from the loss.
-        nodata_value: 255
         enable_miou_metric: true
     default_config:
       transforms:
