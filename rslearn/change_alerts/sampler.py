@@ -7,6 +7,7 @@ from typing import Any
 import torch
 
 from rslearn.train.model_context import RasterImage
+from rslearn.train.tasks.per_pixel_timestep import TIMESTAMP_NODATA_VALUE
 from rslearn.train.transforms.transform import Transform
 
 UNIX_EPOCH = datetime(1970, 1, 1, tzinfo=UTC)
@@ -47,6 +48,16 @@ def change_timestep(
     return None
 
 
+def midpoint_day(time_range: tuple[datetime, datetime]) -> int:
+    """Get the days since 1970-01-01 of the midpoint of a time range.
+
+    This matches how PerPixelTimestepHead dates its input timesteps, so a label with
+    this day maps back to the timestep with this time range.
+    """
+    start, end = _as_utc(time_range[0]), _as_utc(time_range[1])
+    return (start + (end - start) / 2 - UNIX_EPOCH) // timedelta(days=1)
+
+
 class ChangeTimeSeriesSampler(Transform):
     """Build one time series from a choice of options and derive change targets.
 
@@ -65,8 +76,10 @@ class ChangeTimeSeriesSampler(Transform):
 
     If the change day raster is present (it is a target, so it is not loaded during
     prediction), the sampler also computes the timestep target: at each pixel with a
-    change day, the index of the first image in which the change is observable (see
-    change_timestep). Pixels whose change is outside the time series are marked
+    change day, the first image in which the change is observable (see
+    change_timestep). It is written as a PerPixelTimestepTask target, i.e. the label
+    is the day of that image's midpoint, which PerPixelTimestepHead (with either mode)
+    maps back to that image. Pixels whose change is outside the time series are marked
     invalid for both the timestep and the category targets, since the change cannot be
     observed in the input. Pixels without a change day (e.g. negatives) are invalid
     for the timestep target but keep their category target.
@@ -239,7 +252,7 @@ class ChangeTimeSeriesSampler(Transform):
     ) -> None:
         """Compute the timestep target and update the category valid mask."""
         days = change_day.get_hw_tensor().long()
-        classes = torch.zeros(days.shape, dtype=torch.long)
+        label_days = torch.full(days.shape, TIMESTAMP_NODATA_VALUE, dtype=torch.long)
         valid = torch.zeros(days.shape, dtype=torch.float32)
         outside = torch.zeros(days.shape, dtype=torch.bool)
 
@@ -251,11 +264,11 @@ class ChangeTimeSeriesSampler(Transform):
             if idx is None:
                 outside |= mask
             else:
-                classes[mask] = idx
+                label_days[mask] = midpoint_day(timestamps[idx])
                 valid[mask] = 1
 
         target_dict[self.timestep_target] = {
-            "classes": RasterImage(classes[None, None, :, :]),
+            "days": RasterImage(label_days[None, None, :, :]),
             "valid": RasterImage(valid[None, None, :, :]),
         }
 

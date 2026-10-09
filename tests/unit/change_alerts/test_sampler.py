@@ -9,8 +9,13 @@ from rslearn.change_alerts.sampler import (
     UNIX_EPOCH,
     ChangeTimeSeriesSampler,
     change_timestep,
+    midpoint_day,
 )
 from rslearn.train.model_context import RasterImage
+from rslearn.train.tasks.per_pixel_timestep import (
+    DateToTimestepMode,
+    days_to_timesteps,
+)
 
 H = W = 4
 CHANGE = datetime(2024, 5, 10, tzinfo=UTC)
@@ -106,9 +111,20 @@ def test_history_series_and_targets() -> None:
         assert key not in input_dict
 
     timestep = target_dict["timestep"]
-    # Slot 0 ends one week after the change, so it appears in the latest image.
-    assert timestep["classes"].image[0, 0, 1, 1] == 11
+    # Slot 0 ends one week after the change, so it appears in the latest image. The
+    # label is that image's midpoint day, which the head maps back to it.
+    assert timestep["days"].image[0, 0, 1, 1] == midpoint_day(image.timestamps[11])
     assert timestep["valid"].image[0, 0].sum() == 1
+    timestep_days = torch.tensor([midpoint_day(t) for t in image.timestamps])
+    for mode in DateToTimestepMode:
+        classes, valid = days_to_timesteps(
+            timestep["days"].get_hw_tensor(),
+            timestep["valid"].get_hw_tensor(),
+            timestep_days,
+            mode,
+        )
+        assert classes[1, 1] == 11
+        assert valid.sum() == 1
     assert target_dict["category"]["valid"].image.sum() == H * W
 
 

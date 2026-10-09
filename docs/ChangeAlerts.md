@@ -73,8 +73,11 @@ builds the time series, and derives the targets:
    selected frequent image.
 3. Concatenate them chronologically into `input_dict[output_key]`.
 4. If the change day raster is present, compute the timestep target as the first image
-   whose time range ends after the change day. Pixels whose change is outside the time
-   series are ignored for both the timestep and category targets.
+   whose time range ends after the change day. The target is written as that image's
+   midpoint day, the date label that `PerPixelTimestepTask` expects, which
+   `PerPixelTimestepHead` maps back to that image with either `mode`. Pixels whose
+   change is outside the time series are ignored for both the timestep and category
+   targets.
 
 Options without enough images are only picked if no option has enough, in which case
 the time series has fewer timesteps.
