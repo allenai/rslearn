@@ -8,8 +8,10 @@ between two distant time periods (e.g. one year versus another), where a model t
 simply inputs a regular time series spanning both periods is sufficient.
 
 During training, each example is labeled with the date at which a change first becomes
-observable. Several time series ending at different offsets after that date are
-materialized as separate dataset layers (see slots.py), and ChangeTimeSeriesSampler
-(see sampler.py) picks one of them per example and derives per-pixel targets for the
-change category and for the timestep at which the change appears.
+observable. Several frequent time series ending at different offsets after that date
+are materialized as separate dataset layers, sharing one infrequent layer (see
+slots.py), and ChangeTimeSeriesSampler (see sampler.py) picks one of the frequent time
+series per example and prepends infrequent history. The model predicts the change
+category per pixel, and the timestep at which the change appears with
+PerPixelTimestepTask.
 """

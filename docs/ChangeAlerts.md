@@ -21,8 +21,9 @@ series spanning both periods is sufficient.
 Each window is a point in time at the date when the change first becomes observable,
 i.e. its time range is `(change date, change date)`. Labels consist of a category
 raster and a change day raster, which stores the number of days since 1970-01-01 (UTC)
-at which the change first becomes observable at each pixel (0 at pixels without a
-change, e.g. negatives). The change day raster can be stored as `uint16`.
+at which the change first becomes observable at each pixel, with 65535 at pixels
+without a change (e.g. negatives), matching `PerPixelTimestepTask`. The change day
+raster can be stored as `uint16`.
 
 During training, the change should appear at varying positions within the input time
 series. To support this, the dataset contains several "slots", each a time series that
@@ -38,11 +39,17 @@ from rslearn.change_alerts.slots import slot_end_offsets
 offsets = slot_end_offsets(4, detection_range=timedelta(days=90), period=timedelta(days=7))
 ```
 
-`make_slot_layer_configs` creates the dataset layers for each slot: a frequent layer
-ending at the slot end, and optionally an infrequent layer ending at or before the
-start of the frequent images that the model uses. The layers can be longer than the
-model input, so that the sampler can fall back to older periods when the most recent
-ones have no images.
+`make_slot_layer_configs` creates a frequent layer for each slot, ending at the slot
+end, and optionally one infrequent layer shared by all slots. The infrequent layer ends
+where the latest slot's frequent layer starts and extends back far enough to provide
+`infrequent_duration` of history for every slot; the sampler only uses the infrequent
+images that end before the selected frequent images.
+
+Each frequent layer holds the latest `frequent_max_matches` periods within
+`frequent_duration` that have images, so that it falls back to older periods when the
+most recent ones have no images. `frequent_max_matches` is the number of frequent images
+that the model uses. Frequent layers also get `min_matches=1`, so slots without any
+frequent images are reported as rejected during prepare.
 
 ```python
 from rslearn.change_alerts.slots import make_slot_layer_configs
@@ -53,43 +60,44 @@ layers = make_slot_layer_configs(
     band_sets=[{"bands": ["B02", "B03", "B04", "B08"], "dtype": "uint16"}],
     frequent_period=timedelta(days=7),
     frequent_duration=timedelta(days=63),
+    frequent_max_matches=4,
     infrequent_period=timedelta(days=90),
     infrequent_duration=timedelta(days=900),
-    infrequent_end_before=timedelta(days=60),
 )
-# layers is a dict from layer name ("frequent_0", "infrequent_0", ...) to layer
-# config dict, to add to the dataset config.json.
+# layers is a dict from layer name ("frequent_0", ..., "frequent_3", "infrequent")
+# to layer config dict, to add to the dataset config.json.
 ```
 
 ## ChangeTimeSeriesSampler
 
-`ChangeTimeSeriesSampler` is a transform that picks one slot per example (randomly
-during training, or a fixed one via `option_index` for evaluation and prediction),
-builds the time series, and derives the targets:
+`ChangeTimeSeriesSampler` is a transform that picks one frequent input per example
+from `frequent_keys` and builds the time series. It picks the frequent input with the
+most images, randomly among ties, or a fixed one via `frequent_index` for evaluation
+and prediction. Then:
 
-1. Take the latest `num_frequent` frequent images within `frequent_lookback_days` of
-   the latest frequent image.
+1. Take the images of the selected frequent input.
 2. Take the latest `num_infrequent` infrequent images that end before the first
    selected frequent image.
 3. Concatenate them chronologically into `input_dict[output_key]`.
-4. If the change day raster is present, compute the timestep target as the first image
-   whose time range ends after the change day. The target is written as that image's
-   midpoint day, the date label that `PerPixelTimestepTask` expects, which
-   `PerPixelTimestepHead` maps back to that image with either `mode`. Pixels whose
-   change is outside the time series are ignored for both the timestep and category
-   targets.
 
-Options without enough images are only picked if no option has enough, in which case
-the time series has fewer timesteps.
+The timestep at which the change appears is predicted with `PerPixelTimestepTask`, using
+the change day raster as its target, and `PerPixelTimestepHead` with `mode: AFTER`, which
+maps each change day to the earliest image whose midpoint is on or after it. Pixels
+without a change day (e.g. negatives) are ignored by the timestep task, so they only
+train the category.
 
-The sampler removes the option inputs and the change day raster from the input dict.
-Inputs that are only used by the sampler of another split (e.g. validation slots that
-are not used for training) can be removed with `drop_keys`.
+If change dates vary within a window, set `category_target` and `change_day_target` (the
+`PerPixelTimestepTask` target) so that the sampler marks pixels whose change is outside
+the time series (e.g. after the latest image) invalid for both tasks, since the change
+cannot be observed in the input. This is not needed when every pixel in a window shares
+the window's change date.
 
-Each slot input should be loaded with `load_all_layers` and `load_all_item_groups`, and
-the change day raster as a passthrough target input. The timestep task needs some
-target raster to process, so map the change day raster to it; the sampler then
-overwrites the timestep target.
+Each frequent and infrequent input should be loaded with `load_all_layers` and
+`load_all_item_groups`.
+
+Only `freq_0` is required, so windows without any images in that slot are skipped. The
+other frequent inputs are not required: if a slot has no images, its input is missing
+and counts as having zero images, so another slot is picked.
 
 ```yaml
 data:
@@ -103,14 +111,22 @@ data:
         passthrough: true
         load_all_layers: true
         load_all_item_groups: true
-      infreq_0:
+      freq_1:
         data_type: raster
-        layers: [infrequent_0]
+        layers: [frequent_1]
         bands: [B02, B03, B04, B08]
         passthrough: true
         load_all_layers: true
         load_all_item_groups: true
-      # ... freq_1, infreq_1, etc.
+        required: false
+      # ... freq_2, freq_3 like freq_1.
+      infreq:
+        data_type: raster
+        layers: [infrequent]
+        bands: [B02, B03, B04, B08]
+        passthrough: true
+        load_all_layers: true
+        load_all_item_groups: true
       label_category:
         data_type: raster
         layers: [label_category]
@@ -122,7 +138,6 @@ data:
         layers: [label_change_day]
         bands: [label]
         is_target: true
-        passthrough: true
         dtype: INT32
     task:
       class_path: rslearn.train.tasks.multi_task.MultiTask
@@ -146,15 +161,13 @@ data:
       transforms:
         - class_path: rslearn.change_alerts.sampler.ChangeTimeSeriesSampler
           init_args:
-            options:
-              - {frequent: freq_0, infrequent: infreq_0}
-              - {frequent: freq_1, infrequent: infreq_1}
-            num_frequent: 4
-            frequent_lookback_days: 60
+            frequent_keys: [freq_0, freq_1, freq_2, freq_3]
+            infrequent_key: infreq
             num_infrequent: 8
             output_key: sentinel2_l2a
+            # Only needed if change dates vary within a window.
             category_target: category
-            timestep_target: timestep
+            change_day_target: timestep
 ```
 
 ## Metrics
