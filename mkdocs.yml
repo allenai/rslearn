@@ -175,6 +175,7 @@ nav:
           - Model Configuration: ModelConfig.md
           - Tasks and Models: TasksAndModels.md
           - Transforms: Transforms.md
+          - Change Alerts: ChangeAlerts.md
           - Foundation Models:
               - foundation_models/OlmoEarth.md
               - foundation_models/SatlasPretrain.md
