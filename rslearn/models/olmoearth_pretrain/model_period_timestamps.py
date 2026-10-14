@@ -43,8 +43,8 @@ class OlmoEarthPeriodTimestamps(OlmoEarth):
         embedding_size: int | None = None,
         autocast_dtype: str | None = "bfloat16",
         token_pooling: bool = True,
-        use_register_bottleneck_output: bool = False,
-        projected_register_dim: int | None = None,
+        use_location_token_output: bool = False,
+        projected_location_token_dim: int | None = None,
         normalize: bool = False,
         normalize_std_multiplier: float | None = 2,
         compile_model: bool = False,
@@ -65,11 +65,11 @@ class OlmoEarthPeriodTimestamps(OlmoEarth):
             embedding_size: optional embedding size override.
             autocast_dtype: dtype for autocasting, or None to disable.
             token_pooling: whether to pool tokens (BxCxHxW) or keep them (BxCxHxWxN).
-            use_register_bottleneck_output: return the register bottleneck latents
+            use_location_token_output: return the AttentionPooler's location tokens
                 instead of the encoder patch tokens.
-            projected_register_dim: read the detached low-dim student
-                (``projected_registers``) instead of the teacher registers, keeping its
-                first N dimensions. Requires use_register_bottleneck_output.
+            projected_location_token_dim: read the detached low-dim student
+                (``student_location_tokens``) instead of the location tokens, keeping
+                its first N dimensions. Requires use_location_token_output.
             normalize: normalize the inputs inside the forward pass.
             normalize_std_multiplier: std multiplier for normalization.
             compile_model: apply torch.compile to the selected sub-module.
@@ -87,8 +87,8 @@ class OlmoEarthPeriodTimestamps(OlmoEarth):
             embedding_size=embedding_size,
             autocast_dtype=autocast_dtype,
             token_pooling=token_pooling,
-            use_register_bottleneck_output=use_register_bottleneck_output,
-            projected_register_dim=projected_register_dim,
+            use_location_token_output=use_location_token_output,
+            projected_location_token_dim=projected_location_token_dim,
             use_legacy_timestamps=False,
             normalize=normalize,
             normalize_std_multiplier=normalize_std_multiplier,

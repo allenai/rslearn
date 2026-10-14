@@ -320,16 +320,16 @@ def test_arguments_forwarded_to_base_class() -> None:
         period_duration=timedelta(days=30),
         max_matches=4,
         token_pooling=False,
-        use_register_bottleneck_output=True,
-        projected_register_dim=8,
+        use_location_token_output=True,
+        projected_location_token_dim=8,
         normalize=True,
         normalize_std_multiplier=3,
         autocast_dtype=None,
     )
 
     assert model.token_pooling is False
-    assert model.use_register_bottleneck_output is True
-    assert model.projected_register_dim == 8
+    assert model.use_location_token_output is True
+    assert model.projected_location_token_dim == 8
     assert model.normalize is True
     assert model.normalizer.std_multiplier == 3
     assert model.autocast_dtype is None
