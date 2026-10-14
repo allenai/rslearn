@@ -181,11 +181,13 @@ class ChangeTimeSeriesSampler(Transform):
         timestamps = [raster.timestamps[idx] for raster, idx in selected]  # type: ignore[index]
         input_dict[self.output_key] = RasterImage(image, timestamps=timestamps)
 
+        # During prediction with MultiTask, the per-task target dicts are present but
+        # empty.
         if (
             self.category_target is not None
             and self.change_day_target is not None
-            and self.category_target in target_dict
-            and self.change_day_target in target_dict
+            and target_dict.get(self.category_target)
+            and target_dict.get(self.change_day_target)
         ):
             self._mask_outside(timestamps, target_dict)
 

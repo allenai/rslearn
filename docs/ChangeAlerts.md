@@ -16,6 +16,33 @@ These components are not intended for comparing conditions between two distant t
 periods (e.g. one year versus another). For that, a model that inputs a regular time
 series spanning both periods is sufficient.
 
+## Example Configs
+
+These example configs train and apply a change alert model on weekly Sentinel-2
+mosaics preceded by quarterly mosaics, using OlmoEarth:
+
+- [config_train.json](ChangeAlerts/config_train.json): the training dataset config,
+  with four slots (see [Dataset](#dataset)) and the label layers.
+- [config_predict.json](ChangeAlerts/config_predict.json): the prediction dataset
+  config, with a single slot that ends at the window time (see
+  [Prediction](#prediction)).
+- [config.yaml](ChangeAlerts/config.yaml): the model config, which is shared by
+  training and prediction.
+
+The two dataset configs go in separate datasets, and the model config reads the
+dataset path from `DATASET_PATH`:
+
+```
+cp config_train.json dataset_train/config.json
+cp config_predict.json dataset_predict/config.json
+# After creating and materializing windows in each dataset:
+DATASET_PATH=./dataset_train rslearn model fit --config config.yaml
+DATASET_PATH=./dataset_predict rslearn model predict --config config.yaml
+```
+
+Both dataset configs include the output layers, since `RslearnWriter` loads the output
+layer config when it is set up, including during `model fit`.
+
 ## Dataset
 
 Each window is a point in time at the date when the change first becomes observable,
@@ -169,6 +196,127 @@ data:
             category_target: category
             change_day_target: timestep
 ```
+
+## Prediction
+
+At prediction time, each window is a point in time at the time to alert on (e.g. now),
+i.e. its time range is `(t, t)`, and the time series looks back from there. So the
+prediction dataset only needs one slot, which ends at the window time. Create it with
+the same arguments as the training layers, but with a single end offset of zero:
+
+```python
+layers = make_slot_layer_configs(
+    end_offsets=[timedelta(0)],
+    # ... the same data_source, band_sets, and frequent and infrequent options as for
+    # training.
+)
+```
+
+This produces layers named `frequent_0` and `infrequent`, like the training dataset,
+so the same model config can be used for training and prediction:
+
+- The `freq_1` to `freq_3` inputs are not required, so they are skipped since the
+  prediction windows do not have those layers, and the sampler always picks `freq_0`.
+- Set `skip_targets: true` in `predict_config` so that the label inputs are skipped.
+
+The category and change day outputs can be written to separate output layers with two
+`RslearnWriter` callbacks, using `selector: [category]` and `selector: [timestep]`. The
+change day output layer should use the `uint16` dtype with `nodata_value: 65535`. See
+[config.yaml](ChangeAlerts/config.yaml) for the full model config.
+
+## Alerting
+
+When the model is applied repeatedly, e.g. weekly, each change stays in the input time
+series and is predicted again on every run until it is older than the detection range.
+To generate vector alerts only for new changes, maintain a raster that stores, at each
+pixel, the date of the last alert there (as days since 1970-01-01, with 0 where there
+has not been an alert yet). This raster should be on the same grid as the predictions,
+so use prediction windows with the same names and bounds on every run, and only update
+their time range to the current time.
+
+On each run:
+
+1. A pixel is eligible for a new alert if its predicted category is a change category
+   (i.e. not invalid or "no change"), and its predicted change date is more than a
+   margin after its last alert date. Since the change date predictions can jitter
+   between runs, we recommend a margin of 90 days. This also means that a pixel alerts
+   at most once within the margin, so a second change at the same pixel within the
+   margin is not alerted.
+2. Find the connected components of eligible pixels with the same category, and keep
+   the components that meet a minimum area.
+3. Vectorize each kept component as an alert, and set the last alert date of its
+   pixels to the current date.
+
+Since only eligible pixels form components, when a change grows after it was alerted,
+the next alert only covers the newly changed area around it (if it meets the minimum
+area). Eligible pixels in components that are too small do not get a last alert date,
+so they stay eligible on later runs, and can be alerted once the component grows.
+
+Here is a sketch of one run. The predicted category and change day rasters can be read
+with rasterio from the `output_category` and `output_change_day` layers of each window,
+which also provides the transform.
+
+```python
+import numpy as np
+import rasterio.features
+import scipy.ndimage
+
+INVALID_CLASS = 0
+NONE_CLASS = 1
+NODATA_DAY = 65535
+MARGIN_DAYS = 90
+
+
+def make_alerts(category, change_day, last_alert_day, run_day, transform, min_pixels):
+    """Make alerts from one run's outputs, and update the last alert date raster.
+
+    Args:
+        category: HxW predicted category (output_category).
+        change_day: HxW predicted change day (output_change_day).
+        last_alert_day: HxW day of the last alert at each pixel, 0 if none.
+        run_day: the day of this run (days since 1970-01-01).
+        transform: the affine transform of the rasters, e.g. from rasterio.
+        min_pixels: the minimum number of pixels in an alert.
+
+    Returns:
+        a tuple (alerts, last_alert_day) of the list of GeoJSON-like alert features
+        and the updated last alert date raster.
+    """
+    change_day = change_day.astype(np.int32)
+    eligible = (
+        (category != INVALID_CLASS)
+        & (category != NONE_CLASS)
+        & (change_day != NODATA_DAY)
+        & (change_day > last_alert_day.astype(np.int32) + MARGIN_DAYS)
+    )
+
+    alerts = []
+    last_alert_day = last_alert_day.copy()
+    for cls in np.unique(category[eligible]):
+        components, _ = scipy.ndimage.label(eligible & (category == cls))
+        sizes = np.bincount(components.ravel())
+        keep = np.isin(components, np.flatnonzero(sizes >= min_pixels)) & (components > 0)
+        last_alert_day[keep] = run_day
+
+        for geometry, component_id in rasterio.features.shapes(
+            components.astype(np.int32), mask=keep, transform=transform
+        ):
+            pixels = components == component_id
+            alerts.append({
+                "type": "Feature",
+                "geometry": geometry,
+                "properties": {
+                    "category": int(cls),
+                    "alert_day": run_day,
+                    "change_day": int(np.median(change_day[pixels])),
+                    "num_pixels": int(pixels.sum()),
+                },
+            })
+    return alerts, last_alert_day
+```
+
+`min_pixels` is the minimum area divided by the pixel area, e.g. 10 for 0.1 hectares at
+10 m/pixel.
 
 ## Metrics
 

@@ -210,3 +210,8 @@ def test_prediction_without_targets() -> None:
     input_dict, target_dict = sampler(_inputs([7]), {})
     assert input_dict["image"].shape[1] == 4
     assert target_dict == {}
+
+    # MultiTask with skip_targets produces empty per-task target dicts.
+    input_dict, target_dict = sampler(_inputs([7]), {"category": {}, "timestep": {}})
+    assert input_dict["image"].shape[1] == 4
+    assert target_dict == {"category": {}, "timestep": {}}
