@@ -1209,34 +1209,24 @@ def _location_token_context() -> ModelContext:
 
 
 def _stub_output(
-    location_tokens: torch.Tensor,
-    student: torch.Tensor | None = None,
-    keys: tuple[str, str] = ("location_tokens", "student_location_tokens"),
+    location_tokens: torch.Tensor, student: torch.Tensor | None = None
 ) -> dict:
     output = {
         "tokens_and_masks": SimpleNamespace(
             sentinel2_l2a=torch.zeros(1, 1, 1, 2, 1, 8)
         ),
-        keys[0]: location_tokens,
+        "location_tokens": location_tokens,
     }
     if student is not None:
-        output[keys[1]] = student
+        output["student_location_tokens"] = student
     return output
 
 
-@pytest.mark.parametrize(
-    "keys",
-    [
-        ("location_tokens", "student_location_tokens"),
-        # olmoearth_pretrain_minimal releases from before the AttentionPooler rename.
-        ("registers", "student_registers"),
-    ],
-)
-def test_location_tokens_are_transposed_to_feature_map(keys: tuple[str, str]) -> None:
+def test_location_tokens_are_transposed_to_feature_map() -> None:
     """Gridded location tokens [B, n_h, n_w, D] become a BxCxHxW feature map."""
     tokens = torch.arange(2 * 2 * 16, dtype=torch.float32).reshape(1, 2, 2, 16)
 
-    features = _location_token_model(_stub_output(tokens, keys=keys))(
+    features = _location_token_model(_stub_output(tokens))(
         _location_token_context()
     ).feature_maps[0]
 
@@ -1244,22 +1234,13 @@ def test_location_tokens_are_transposed_to_feature_map(keys: tuple[str, str]) ->
     torch.testing.assert_close(features, tokens.permute(0, 3, 1, 2))
 
 
-@pytest.mark.parametrize(
-    "keys",
-    [
-        ("location_tokens", "student_location_tokens"),
-        ("registers", "student_registers"),
-    ],
-)
-def test_projected_location_token_dim_selects_and_truncates_student(
-    keys: tuple[str, str],
-) -> None:
+def test_projected_location_token_dim_selects_and_truncates_student() -> None:
     """The student is used instead of the location tokens, cut to the requested width."""
     teacher = torch.zeros(1, 2, 2, 16)
     student = torch.arange(2 * 2 * 16, dtype=torch.float32).reshape(1, 2, 2, 16)
 
     model = _location_token_model(
-        _stub_output(teacher, student, keys=keys), projected_location_token_dim=8
+        _stub_output(teacher, student), projected_location_token_dim=8
     )
     features = model(_location_token_context()).feature_maps[0]
 

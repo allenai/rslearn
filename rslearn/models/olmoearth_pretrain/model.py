@@ -72,11 +72,6 @@ EMBEDDING_SIZES = {
 }
 
 
-def _first_present(output: dict[str, Any], *keys: str) -> str | None:
-    """The first of ``keys`` present in ``output``, or None."""
-    return next((key for key in keys if key in output), None)
-
-
 class OlmoEarth(FeatureExtractor):
     """A wrapper to support the OlmoEarth model."""
 
@@ -826,26 +821,21 @@ class OlmoEarth(FeatureExtractor):
         if self.use_location_token_output:
             # Return the AttentionPooler's location tokens instead of the encoder
             # patch tokens. They form an (n_h, n_w) grid that matches the location
-            # query grid. olmoearth_pretrain_minimal releases from before the
-            # AttentionPooler rename call them "registers" / "student_registers".
-            key = _first_present(model_output, "location_tokens", "registers")
-            if key is None:
+            # query grid.
+            if "location_tokens" not in model_output:
                 raise ValueError(
                     "use_location_token_output=True but the model output has no "
                     "'location_tokens'; the loaded model must have an AttentionPooler"
                 )
-            location_tokens = model_output[key]
+            location_tokens = model_output["location_tokens"]
             if self.projected_location_token_dim is not None:
-                student_key = _first_present(
-                    model_output, "student_location_tokens", "student_registers"
-                )
-                if student_key is None:
+                if "student_location_tokens" not in model_output:
                     raise ValueError(
                         "projected_location_token_dim is set but the model output has "
                         "no 'student_location_tokens'; this checkpoint has no "
                         "detached student"
                     )
-                location_tokens = model_output[student_key][
+                location_tokens = model_output["student_location_tokens"][
                     ..., : self.projected_location_token_dim
                 ]
             # Location tokens are [B, n_h, n_w, D].
