@@ -45,8 +45,6 @@ class OlmoEarthPeriodTimestamps(OlmoEarth):
         token_pooling: bool = True,
         use_location_token_output: bool = False,
         projected_location_token_dim: int | None = None,
-        use_register_bottleneck_output: bool | None = None,
-        projected_register_dim: int | None = None,
         normalize: bool = False,
         normalize_std_multiplier: float | None = 2,
         compile_model: bool = False,
@@ -72,10 +70,6 @@ class OlmoEarthPeriodTimestamps(OlmoEarth):
             projected_location_token_dim: read the detached low-dim student
                 (``student_location_tokens``) instead of the location tokens, keeping
                 its first N dimensions. Requires use_location_token_output.
-            use_register_bottleneck_output: Deprecated, use use_location_token_output
-                instead. Will be removed on 2027-01-01.
-            projected_register_dim: Deprecated, use projected_location_token_dim
-                instead. Will be removed on 2027-01-01.
             normalize: normalize the inputs inside the forward pass.
             normalize_std_multiplier: std multiplier for normalization.
             compile_model: apply torch.compile to the selected sub-module.
@@ -95,8 +89,6 @@ class OlmoEarthPeriodTimestamps(OlmoEarth):
             token_pooling=token_pooling,
             use_location_token_output=use_location_token_output,
             projected_location_token_dim=projected_location_token_dim,
-            use_register_bottleneck_output=use_register_bottleneck_output,
-            projected_register_dim=projected_register_dim,
             use_legacy_timestamps=False,
             normalize=normalize,
             normalize_std_multiplier=normalize_std_multiplier,

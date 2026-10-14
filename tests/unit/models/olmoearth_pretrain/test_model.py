@@ -1280,34 +1280,6 @@ def test_projected_location_token_dim_requires_location_token_output() -> None:
         )
 
 
-def test_deprecated_register_options_still_work() -> None:
-    """The pre-AttentionPooler option names warn and map onto the new ones."""
-    with pytest.warns(FutureWarning, match="use_location_token_output"):
-        with pytest.warns(FutureWarning, match="projected_location_token_dim"):
-            model = OlmoEarth(
-                checkpoint_path="tests/unit/models/olmoearth_pretrain/",
-                random_initialization=True,
-                patch_size=4,
-                embedding_size=128,
-                use_register_bottleneck_output=True,
-                projected_register_dim=8,
-            )
-    assert model.use_location_token_output is True
-    assert model.projected_location_token_dim == 8
-
-    with pytest.raises(ValueError, match="different values"):
-        with pytest.warns(FutureWarning):
-            OlmoEarth(
-                checkpoint_path="tests/unit/models/olmoearth_pretrain/",
-                random_initialization=True,
-                patch_size=4,
-                embedding_size=128,
-                use_location_token_output=True,
-                projected_location_token_dim=16,
-                projected_register_dim=8,
-            )
-
-
 def test_projected_location_token_dim_without_student_head() -> None:
     """A checkpoint with no student fails loudly rather than using the location tokens."""
     model = _location_token_model(

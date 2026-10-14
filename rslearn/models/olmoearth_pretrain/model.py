@@ -94,8 +94,6 @@ class OlmoEarth(FeatureExtractor):
         token_pooling: bool = True,
         use_location_token_output: bool = False,
         projected_location_token_dim: int | None = None,
-        use_register_bottleneck_output: bool | None = None,
-        projected_register_dim: int | None = None,
         use_legacy_timestamps: bool = True,
         timestamp_error_tolerance: timedelta = timedelta(days=15),
         normalize: bool = False,
@@ -140,10 +138,6 @@ class OlmoEarth(FeatureExtractor):
                 N is a Matryoshka prefix: the student is trained so that ``[..., :N]``
                 is itself a strong embedding, for each trained width. Requires
                 use_location_token_output.
-            use_register_bottleneck_output: Deprecated, use use_location_token_output
-                instead. Will be removed on 2027-01-01.
-            projected_register_dim: Deprecated, use projected_location_token_dim
-                instead. Will be removed on 2027-01-01.
             use_legacy_timestamps: set timestamps to dummy values [1 January 2024, 1 February 2024, ...]
                 instead of the actual timestamps of the input. The option to do this is preserved
                 for backwards compatability with finetuned models which were trained against this
@@ -253,30 +247,6 @@ class OlmoEarth(FeatureExtractor):
             self.sdpa_backends = None
 
         self.token_pooling = token_pooling
-        # Handle the deprecated pre-AttentionPooler names of the two options below.
-        if use_register_bottleneck_output is not None:
-            warnings.warn(
-                "use_register_bottleneck_output is deprecated and will be removed on "
-                "2027-01-01. Use use_location_token_output instead.",
-                FutureWarning,
-                stacklevel=2,
-            )
-            use_location_token_output = (
-                use_location_token_output or use_register_bottleneck_output
-            )
-        if projected_register_dim is not None:
-            warnings.warn(
-                "projected_register_dim is deprecated and will be removed on "
-                "2027-01-01. Use projected_location_token_dim instead.",
-                FutureWarning,
-                stacklevel=2,
-            )
-            if projected_location_token_dim not in (None, projected_register_dim):
-                raise ValueError(
-                    "projected_register_dim and projected_location_token_dim are both "
-                    "set, to different values"
-                )
-            projected_location_token_dim = projected_register_dim
         self.use_location_token_output = use_location_token_output
         if projected_location_token_dim is not None and not use_location_token_output:
             raise ValueError(
