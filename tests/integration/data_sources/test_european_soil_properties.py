@@ -40,7 +40,7 @@ def _write_texture_geotiff(path: pathlib.Path) -> pathlib.Path:
     values = np.array(
         [
             [[51, 0], [0, 25]],
-            [[102, 0], [0, 75]],
+            [[101, 0], [0, 75]],
             [[102, 0], [255, 155]],
         ],
         dtype=np.uint8,
@@ -134,7 +134,9 @@ def test_read_raster_scales_and_masks_empty_pairs(
     array = raster.get_chw_array()
 
     assert array.shape == (3, 2, 2)
-    np.testing.assert_allclose(array[:, 0, 0], np.array([51, 102, 102]) * PERCENT_SCALE)
+    expected = np.array([51, 101, 102]) * PERCENT_SCALE
+    expected *= 100 / expected.sum()
+    np.testing.assert_allclose(array[:, 0, 0], expected)
     assert np.isnan(array[:, 0, 1]).all()
     # A zero texture value with non-zero uncertainty is valid, not nodata.
     np.testing.assert_allclose(array[:, 1, 0], [0, 0, 100])

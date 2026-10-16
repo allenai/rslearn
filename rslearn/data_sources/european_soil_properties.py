@@ -215,12 +215,32 @@ class EuropeanSoilProperties(
                 height=bounds[3] - bounds[1],
                 resampling=resampling,
             ) as vrt:
-                raw_data = vrt.read(indexes=[1, 2, 3, 4, 5, 6])
+                raw_values = vrt.read(indexes=[1, 2, 3])
 
-        values = raw_data[:3].astype(np.float32) * PERCENT_SCALE
-        uncertainty = raw_data[3:]
-        empty = (raw_data[:3] == 0) & (uncertainty == 0)
+            # The provider defines an empty pixel as a value/uncertainty pair that
+            # is both zero. Always resample those pairs with nearest-neighbour so
+            # interpolation does not bleed values into empty source pixels.
+            with rasterio.vrt.WarpedVRT(
+                src,
+                crs=projection.crs,
+                transform=wanted_transform,
+                width=bounds[2] - bounds[0],
+                height=bounds[3] - bounds[1],
+                resampling=Resampling.nearest,
+            ) as mask_vrt:
+                mask_data = mask_vrt.read(indexes=[1, 2, 3, 4, 5, 6])
+
+        values = raw_values.astype(np.float32) * PERCENT_SCALE
+        empty = (mask_data[:3] == 0) & (mask_data[3:] == 0)
         values[empty] = np.nan
+
+        # The model produces compositional fractions summing to one before they are
+        # quantized to bytes. Restore that invariant after reprojection; this also
+        # prevents interpolation with adjacent empty pixels from depressing the sum.
+        valid = np.all(np.isfinite(values), axis=0)
+        totals = values.sum(axis=0)
+        normalizable = valid & (totals > 0)
+        values[:, normalizable] *= 100.0 / totals[normalizable]
 
         return RasterArray(
             chw_array=values,
