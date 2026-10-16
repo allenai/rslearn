@@ -128,6 +128,7 @@ These data sources are still experimental and may have incomplete functionality.
 
 | Data Source | Description |
 |---|---|
+| [european_soil_properties.EuropeanSoilProperties](data_sources/european_soil_properties_EuropeanSoilProperties.md) | European clay, sand, and silt maps (10m) |
 | [soilgrids.SoilGrids](data_sources/soilgrids_SoilGrids.md) | ISRIC SoilGrids via WCS (~250m) |
 | [soildb.SoilDB](data_sources/soildb_SoilDB.md) | OpenLandMap SoilDB (30m) |
 
