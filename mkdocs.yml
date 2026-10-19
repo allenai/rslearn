@@ -139,6 +139,7 @@ nav:
           - data_sources/earthdaily_Sentinel2L2A.md
           - data_sources/earthdatahub_ERA5LandDailyUTCv1.md
           - data_sources/eurocrops_EuroCrops.md
+          - data_sources/european_soil_properties_EuropeanSoilProperties.md
           - data_sources/gcp_landsat_Landsat.md
           - data_sources/gcp_public_data_Sentinel2.md
           - data_sources/google_earth_engine_GEE.md
