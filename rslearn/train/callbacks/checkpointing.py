@@ -5,10 +5,40 @@ from typing import Any, Literal
 
 from lightning.pytorch import LightningModule, Trainer
 from lightning.pytorch.callbacks import Callback
+from lightning.pytorch.trainer.states import TrainerFn
 
 from rslearn.log_utils import get_logger
 
 logger = get_logger(__name__)
+
+
+def _is_local_path(path: str) -> bool:
+    """Return whether path refers to the local filesystem."""
+    return "://" not in path or path.startswith("file://")
+
+
+def _save_checkpoint_atomic(trainer: Trainer, path: str) -> None:
+    """Save a checkpoint so that a crash never leaves a partial file at path.
+
+    For local paths, Lightning stages the checkpoint in the system temp directory and
+    then moves it into place. When the temp directory is on a different filesystem
+    (e.g. /tmp vs a network filesystem), the move becomes a copy, so a job that is
+    preempted mid-copy leaves a truncated checkpoint behind, and auto-resume then fails
+    to load it. Here we instead save to a temporary file next to the target and rename
+    it over the target, which is atomic within a directory.
+
+    Remote paths (e.g. gs://) are saved directly since object writes are already atomic.
+    """
+    if not _is_local_path(path):
+        trainer.save_checkpoint(path)
+        return
+
+    local_path = path.removeprefix("file://")
+    tmp_path = f"{local_path}.tmp"
+    # trainer.save_checkpoint writes on rank 0 and ends with a barrier across ranks.
+    trainer.save_checkpoint(tmp_path)
+    if trainer.is_global_zero:
+        os.replace(tmp_path, local_path)
 
 
 class BestLastCheckpoint(Callback):
@@ -44,6 +74,12 @@ class BestLastCheckpoint(Callback):
         """Save last.ckpt always, and best.ckpt when the monitored metric improves."""
         if trainer.sanity_checking:
             return
+        # Only save during fit. Standalone validation (e.g. `model validate` after
+        # training) must not overwrite last.ckpt/best.ckpt with a checkpoint that does
+        # not carry the fit loop state, since a later auto-resume would then restart
+        # training from the beginning.
+        if trainer.state.fn != TrainerFn.FITTING:
+            return
 
         # Check metric value to handle best.ckpt.
         if self.monitor not in trainer.callback_metrics:
@@ -59,7 +95,7 @@ class BestLastCheckpoint(Callback):
         if is_better:
             self._best_value = current_val
             best_path = os.path.join(self.dirpath, "best.ckpt")
-            trainer.save_checkpoint(best_path)
+            _save_checkpoint_atomic(trainer, best_path)
 
             # Previously this entire function was decorated with @rank_zero_only, but this resulted
             # in NCCL timeout because all ranks must call trainer.save_checkpoint. Log only on rank 0.
@@ -78,7 +114,7 @@ class BestLastCheckpoint(Callback):
         # - If we crash after writing last.ckpt, we will restore the correct
         #   self._best_value and won't override the checkpoint incorrectly.
         last_path = os.path.join(self.dirpath, "last.ckpt")
-        trainer.save_checkpoint(last_path)
+        _save_checkpoint_atomic(trainer, last_path)
         if trainer.is_global_zero:
             logger.info("saved checkpoint to %s", last_path)
 
