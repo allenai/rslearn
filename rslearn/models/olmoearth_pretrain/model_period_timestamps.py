@@ -23,10 +23,10 @@ class OlmoEarthPeriodTimestamps(OlmoEarth):
     """OlmoEarth model that aligns images to periods derived from the window time range.
 
     This subclass assumes that all modalities are configured with the same
-    period_duration and max_matches, with no time_offset/duration modifying the window
-    time range, and no fallback periods (so that the periods can be computed based on the
-    window time range + period_duration). Then, we align modalities by computing the
-    periods for each sample, and aligning images in each modality against those periods.
+    period_duration, max_matches, time_offset and duration (so that the periods can be
+    computed based on the window time range + period_duration). Then, we align
+    modalities by computing the periods for each sample, and aligning images in each
+    modality against those periods.
     """
 
     def __init__(
@@ -34,6 +34,8 @@ class OlmoEarthPeriodTimestamps(OlmoEarth):
         patch_size: int,
         period_duration: timedelta,
         max_matches: int,
+        time_offset: timedelta | None = None,
+        duration: timedelta | None = None,
         model_id: ModelID | None = None,
         model_path: str | None = None,
         checkpoint_path: str | None = None,
@@ -56,6 +58,12 @@ class OlmoEarthPeriodTimestamps(OlmoEarth):
             patch_size: token spatial patch size to use.
             period_duration: length of each period (e.g. timedelta(days=30)).
             max_matches: total number of periods to create from the window time range.
+                Layers that search extra fallback periods should count those too, so
+                an image from a fallback period gets its own slot.
+            time_offset: the layers' time_offset, applied to the window time range
+                the same way the layer config applies it.
+            duration: the layers' duration, applied to the window time range the same
+                way the layer config applies it.
             model_id: the model ID to load.
             model_path: the path to load the model from.
             checkpoint_path: the checkpoint directory to load from.
@@ -97,6 +105,28 @@ class OlmoEarthPeriodTimestamps(OlmoEarth):
         )
         self.period_duration = period_duration
         self.max_matches = max_matches
+        self.time_offset = time_offset
+        self.duration = duration
+
+    def _get_request_time_range(
+        self, time_range: tuple[datetime, datetime]
+    ) -> tuple[datetime, datetime]:
+        """Apply time_offset and duration like DataSourceConfig.get_request_time_range.
+
+        Args:
+            time_range: the window's time range.
+
+        Returns:
+            the time range the layers searched for images.
+        """
+        if self.time_offset:
+            time_range = (
+                time_range[0] + self.time_offset,
+                time_range[1] + self.time_offset,
+            )
+        if self.duration:
+            time_range = (time_range[0], time_range[0] + self.duration)
+        return time_range
 
     @staticmethod
     def _compute_periods(
@@ -268,7 +298,9 @@ class OlmoEarthPeriodTimestamps(OlmoEarth):
                     "to be set for all samples."
                 )
             periods = self._compute_periods(
-                metadata.time_range, self.period_duration, self.max_matches
+                self._get_request_time_range(metadata.time_range),
+                self.period_duration,
+                self.max_matches,
             )
             if len(periods) == 0:
                 raise ValueError(

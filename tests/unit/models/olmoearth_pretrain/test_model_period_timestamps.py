@@ -33,6 +33,8 @@ def _make_metadata(
 def _make_model(
     period_duration: timedelta = timedelta(days=30),
     max_matches: int = 4,
+    time_offset: timedelta | None = None,
+    duration: timedelta | None = None,
 ) -> OlmoEarthPeriodTimestamps:
     return OlmoEarthPeriodTimestamps(
         checkpoint_path="tests/unit/models/olmoearth_pretrain/",
@@ -41,6 +43,8 @@ def _make_model(
         embedding_size=128,
         period_duration=period_duration,
         max_matches=max_matches,
+        time_offset=time_offset,
+        duration=duration,
     )
 
 
@@ -287,6 +291,77 @@ def test_zero_periods_raises() -> None:
     )
     with pytest.raises(ValueError, match="zero periods"):
         model._prepare_modality_inputs(context)
+
+
+def test_duration_sets_periods_from_window_start() -> None:
+    """Periods follow the layers' duration, not the window's own end."""
+    model = _make_model(
+        period_duration=timedelta(days=30),
+        max_matches=4,
+        duration=timedelta(days=120),
+    )
+
+    H, W = 4, 4
+    # A point-in-time window, which has zero periods without the duration.
+    time_range = (datetime(2025, 1, 1), datetime(2025, 1, 1))
+    inputs = [
+        {
+            "sentinel2_l2a": RasterImage(
+                image=torch.ones((12, 1, H, W), dtype=torch.float32),
+                timestamps=[(datetime(2025, 3, 15), datetime(2025, 3, 15))],
+            ),
+        }
+    ]
+    context = ModelContext(
+        inputs=inputs,
+        metadatas=[_make_metadata((0, 0, H, W), time_range=time_range)],
+    )
+    sample, _, _ = model._prepare_modality_inputs(context)
+
+    # Periods tile Jan 1 + 120 days, so March 15 falls in the third one.
+    mask = sample.sentinel2_l2a_mask  # (B, H, W, T, S)
+    assert mask.shape[3] == 4
+    assert (mask[0, :, :, 2, :] == MaskValue.ONLINE_ENCODER.value).all()
+    for t_idx in [0, 1, 3]:
+        assert (mask[0, :, :, t_idx, :] == MaskValue.MISSING.value).all()
+
+
+def test_time_offset_gives_fallback_periods_their_own_slot() -> None:
+    """An image from a fallback period before the window keeps its real period."""
+    # Two primary periods plus one fallback period searched before the window.
+    model = _make_model(
+        period_duration=timedelta(days=30),
+        max_matches=3,
+        time_offset=-timedelta(days=30),
+        duration=timedelta(days=90),
+    )
+
+    H, W = 4, 4
+    time_range = (datetime(2025, 1, 31), datetime(2025, 4, 1))
+    # The first primary period had no coverage, so the fallback period filled in.
+    timestamps = [
+        (datetime(2025, 1, 1), datetime(2025, 1, 31)),
+        (datetime(2025, 3, 2), datetime(2025, 4, 1)),
+    ]
+    inputs = [
+        {
+            "sentinel2_l2a": RasterImage(
+                image=torch.ones((12, 2, H, W), dtype=torch.float32),
+                timestamps=timestamps,
+            ),
+        }
+    ]
+    context = ModelContext(
+        inputs=inputs,
+        metadatas=[_make_metadata((0, 0, H, W), time_range=time_range)],
+    )
+    sample, _, _ = model._prepare_modality_inputs(context)
+
+    mask = sample.sentinel2_l2a_mask  # (B, H, W, T, S)
+    assert mask.shape[3] == 3
+    assert (mask[0, :, :, 0, :] == MaskValue.ONLINE_ENCODER.value).all()
+    assert (mask[0, :, :, 1, :] == MaskValue.MISSING.value).all()
+    assert (mask[0, :, :, 2, :] == MaskValue.ONLINE_ENCODER.value).all()
 
 
 def test_time_range_none_raises() -> None:
