@@ -111,7 +111,7 @@ class OlmoEarthPeriodTimestamps(OlmoEarth):
     def _get_request_time_range(
         self, time_range: tuple[datetime, datetime]
     ) -> tuple[datetime, datetime]:
-        """Apply time_offset and duration like DataSourceConfig.get_request_time_range.
+        """Shift the window time range by time_offset, then end it duration after its start.
 
         Args:
             time_range: the window's time range.
