@@ -13,6 +13,7 @@ from olmoearth_pretrain_minimal.olmoearth_pretrain_v1.utils.datatypes import (
     MaskValue,
 )
 
+from rslearn.config.dataset import get_request_time_range
 from rslearn.models.olmoearth_pretrain.model import MODALITY_NAMES, OlmoEarth
 from rslearn.train.model_context import ModelContext, RasterImage
 
@@ -107,26 +108,6 @@ class OlmoEarthPeriodTimestamps(OlmoEarth):
         self.max_matches = max_matches
         self.time_offset = time_offset
         self.duration = duration
-
-    def _get_request_time_range(
-        self, time_range: tuple[datetime, datetime]
-    ) -> tuple[datetime, datetime]:
-        """Shift the window time range by time_offset, then end it duration after its start.
-
-        Args:
-            time_range: the window's time range.
-
-        Returns:
-            the time range the layers searched for images.
-        """
-        if self.time_offset:
-            time_range = (
-                time_range[0] + self.time_offset,
-                time_range[1] + self.time_offset,
-            )
-        if self.duration:
-            time_range = (time_range[0], time_range[0] + self.duration)
-        return time_range
 
     @staticmethod
     def _compute_periods(
@@ -298,7 +279,9 @@ class OlmoEarthPeriodTimestamps(OlmoEarth):
                     "to be set for all samples."
                 )
             periods = self._compute_periods(
-                self._get_request_time_range(metadata.time_range),
+                get_request_time_range(
+                    metadata.time_range, self.time_offset, self.duration
+                ),
                 self.period_duration,
                 self.max_matches,
             )

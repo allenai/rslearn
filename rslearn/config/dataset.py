@@ -471,6 +471,30 @@ class QueryConfig(BaseModel):
     )
 
 
+def get_request_time_range(
+    window_time_range: tuple[datetime, datetime],
+    time_offset: timedelta | None,
+    duration: timedelta | None,
+) -> tuple[datetime, datetime]:
+    """Apply time_offset and duration to a window time range.
+
+    Args:
+        window_time_range: the window's original time range.
+        time_offset: optional timedelta to add to both ends of the time range.
+        duration: optional, if the (offset) time range is (t0, t1), then update to
+            (t0, t0 + duration).
+
+    Returns:
+        The adjusted time range.
+    """
+    result = window_time_range
+    if time_offset:
+        result = (result[0] + time_offset, result[1] + time_offset)
+    if duration:
+        result = (result[0], result[0] + duration)
+    return result
+
+
 class DataSourceConfig(BaseModel):
     """Configuration for a DataSource in a dataset layer."""
 
@@ -522,12 +546,9 @@ class DataSourceConfig(BaseModel):
         """
         if window_time_range is None:
             return None
-        result = window_time_range
-        if self.time_offset:
-            result = (result[0] + self.time_offset, result[1] + self.time_offset)
-        if self.duration:
-            result = (result[0], result[0] + self.duration)
-        return result
+        return get_request_time_range(
+            window_time_range, self.time_offset, self.duration
+        )
 
     @model_validator(mode="before")
     @classmethod
