@@ -87,8 +87,8 @@ class OlmoEarth(FeatureExtractor):
         embedding_size: int | None = None,
         autocast_dtype: str | None = "bfloat16",
         token_pooling: bool = True,
-        use_register_bottleneck_output: bool = False,
-        projected_register_dim: int | None = None,
+        use_location_token_output: bool = False,
+        projected_location_token_dim: int | None = None,
         use_legacy_timestamps: bool = True,
         timestamp_error_tolerance: timedelta = timedelta(days=15),
         normalize: bool = False,
@@ -121,20 +121,18 @@ class OlmoEarth(FeatureExtractor):
             token_pooling: whether or not to pool the tokens. If True, the output will be BxCxHxW. If False,
                 there will be an extra dimension, N, (BxCxHxWxN) representing the temporal and channel
                 dimensions.
-            use_register_bottleneck_output: return the model's spatial register
-                bottleneck latents instead of the encoder patch tokens. The model must
-                have a register bottleneck (e.g. "regbtl" checkpoints); its register
-                grid latents (register_dim channels, typically narrower than the
-                encoder width) are returned as a single BxCxHxW feature map. Note that
-                this is unrelated to the classic ViT register tokens
-                (num_register_tokens).
-            projected_register_dim: read the detached low-dim student
-                (``student_registers``) instead of the teacher registers, keeping its
-                first N dimensions. Distilled checkpoints emit both heads, and the
-                teacher is the default, so this is what selects the student. N is a
-                Matryoshka prefix: the student is trained so that ``[..., :N]`` is
-                itself a strong embedding, for each trained width. Requires
-                use_register_bottleneck_output.
+            use_location_token_output: return the location tokens of the model's
+                AttentionPooler (OlmoEarth v1.3) instead of the encoder patch tokens:
+                one token per location-query grid cell (pooler_dim channels), returned
+                as a single BxCxHxW feature map. The model must have an
+                AttentionPooler.
+            projected_location_token_dim: read the detached low-dim student
+                (``student_location_tokens``) instead of the location tokens, keeping
+                its first N dimensions. Models with a student emit both, and the
+                location tokens are the default, so this is what selects the student.
+                N is a Matryoshka prefix: the student is trained so that ``[..., :N]``
+                is itself a strong embedding, for each trained width. Requires
+                use_location_token_output.
             use_legacy_timestamps: set timestamps to dummy values [1 January 2024, 1 February 2024, ...]
                 instead of the actual timestamps of the input. The option to do this is preserved
                 for backwards compatability with finetuned models which were trained against this
@@ -244,13 +242,13 @@ class OlmoEarth(FeatureExtractor):
             self.sdpa_backends = None
 
         self.token_pooling = token_pooling
-        self.use_register_bottleneck_output = use_register_bottleneck_output
-        if projected_register_dim is not None and not use_register_bottleneck_output:
+        self.use_location_token_output = use_location_token_output
+        if projected_location_token_dim is not None and not use_location_token_output:
             raise ValueError(
-                "projected_register_dim requires use_register_bottleneck_output=True "
-                "(the student only exists under the register bottleneck)"
+                "projected_location_token_dim requires use_location_token_output=True "
+                "(the student only exists on models with an AttentionPooler)"
             )
-        self.projected_register_dim = projected_register_dim
+        self.projected_location_token_dim = projected_location_token_dim
         self.use_legacy_timestamps = use_legacy_timestamps
         self.timestamp_error_tolerance = timestamp_error_tolerance
 
@@ -820,28 +818,28 @@ class OlmoEarth(FeatureExtractor):
             tokens_and_masks, present_modalities
         )
 
-        if self.use_register_bottleneck_output:
-            # Return the spatial register bottleneck latents instead of the encoder
-            # patch tokens. The registers form an (n_h, n_w) grid; in dynamic-grid
-            # mode this matches the patch grid.
-            if "registers" not in model_output:
+        if self.use_location_token_output:
+            # Return the AttentionPooler's location tokens instead of the encoder
+            # patch tokens. They form an (n_h, n_w) grid that matches the location
+            # query grid.
+            if "location_tokens" not in model_output:
                 raise ValueError(
-                    "use_register_bottleneck_output=True but the model output has no "
-                    "'registers' key; the loaded model must have a register bottleneck"
+                    "use_location_token_output=True but the model output has no "
+                    "'location_tokens'; the loaded model must have an AttentionPooler"
                 )
-            registers = model_output["registers"]
-            if self.projected_register_dim is not None:
-                if "student_registers" not in model_output:
+            location_tokens = model_output["location_tokens"]
+            if self.projected_location_token_dim is not None:
+                if "student_location_tokens" not in model_output:
                     raise ValueError(
-                        "projected_register_dim is set but the model output has no "
-                        "'student_registers'; this checkpoint has no detached "
-                        "register student"
+                        "projected_location_token_dim is set but the model output has "
+                        "no 'student_location_tokens'; this checkpoint has no "
+                        "detached student"
                     )
-                registers = model_output["student_registers"][
-                    ..., : self.projected_register_dim
+                location_tokens = model_output["student_location_tokens"][
+                    ..., : self.projected_location_token_dim
                 ]
-            # Register outputs are [B, n_h, n_w, D].
-            features = rearrange(registers, "b h w d -> b d h w")
+            # Location tokens are [B, n_h, n_w, D].
+            features = rearrange(location_tokens, "b h w d -> b d h w")
             return FeatureMaps([features])
 
         # Apply temporal/modality pooling so we just have one feature per patch.

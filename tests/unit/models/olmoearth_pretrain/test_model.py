@@ -1167,7 +1167,7 @@ def test_compute_tokens_in_batch() -> None:
 
 
 class _StubBackbone(torch.nn.Module):
-    """Inner model returning fixed outputs, to exercise the register branch alone."""
+    """Inner model returning fixed outputs, to exercise the location-token branch alone."""
 
     def __init__(self, output: dict) -> None:
         super().__init__()
@@ -1177,8 +1177,8 @@ class _StubBackbone(torch.nn.Module):
         return self.output
 
 
-def _register_model(
-    output: dict, projected_register_dim: int | None = None
+def _location_token_model(
+    output: dict, projected_location_token_dim: int | None = None
 ) -> OlmoEarth:
     """Build a model whose backbone returns the given output."""
     model = OlmoEarth(
@@ -1186,14 +1186,14 @@ def _register_model(
         random_initialization=True,
         patch_size=4,
         embedding_size=128,
-        use_register_bottleneck_output=True,
-        projected_register_dim=projected_register_dim,
+        use_location_token_output=True,
+        projected_location_token_dim=projected_location_token_dim,
     )
     model.model = _StubBackbone(output)
     return model
 
 
-def _register_context() -> ModelContext:
+def _location_token_context() -> ModelContext:
     """A one-sample context with a single two-timestep modality."""
     inputs = [
         {
@@ -1209,60 +1209,62 @@ def _register_context() -> ModelContext:
 
 
 def _stub_output(
-    registers: torch.Tensor, projected: torch.Tensor | None = None
+    location_tokens: torch.Tensor, student: torch.Tensor | None = None
 ) -> dict:
     output = {
         "tokens_and_masks": SimpleNamespace(
             sentinel2_l2a=torch.zeros(1, 1, 1, 2, 1, 8)
         ),
-        "registers": registers,
+        "location_tokens": location_tokens,
     }
-    if projected is not None:
-        output["student_registers"] = projected
+    if student is not None:
+        output["student_location_tokens"] = student
     return output
 
 
-def test_register_output_is_transposed_to_feature_map() -> None:
-    """Gridded registers [B, n_h, n_w, D] become a BxCxHxW feature map."""
-    registers = torch.arange(2 * 2 * 16, dtype=torch.float32).reshape(1, 2, 2, 16)
+def test_location_tokens_are_transposed_to_feature_map() -> None:
+    """Gridded location tokens [B, n_h, n_w, D] become a BxCxHxW feature map."""
+    tokens = torch.arange(2 * 2 * 16, dtype=torch.float32).reshape(1, 2, 2, 16)
 
-    features = _register_model(_stub_output(registers))(
-        _register_context()
+    features = _location_token_model(_stub_output(tokens))(
+        _location_token_context()
     ).feature_maps[0]
 
     assert features.shape == (1, 16, 2, 2)
-    torch.testing.assert_close(features, registers.permute(0, 3, 1, 2))
+    torch.testing.assert_close(features, tokens.permute(0, 3, 1, 2))
 
 
-def test_projected_register_dim_selects_and_truncates_student() -> None:
-    """The student head is used instead of the teacher, cut to the requested width."""
+def test_projected_location_token_dim_selects_and_truncates_student() -> None:
+    """The student is used instead of the location tokens, cut to the requested width."""
     teacher = torch.zeros(1, 2, 2, 16)
     student = torch.arange(2 * 2 * 16, dtype=torch.float32).reshape(1, 2, 2, 16)
 
-    model = _register_model(_stub_output(teacher, student), projected_register_dim=8)
-    features = model(_register_context()).feature_maps[0]
+    model = _location_token_model(
+        _stub_output(teacher, student), projected_location_token_dim=8
+    )
+    features = model(_location_token_context()).feature_maps[0]
 
     assert features.shape == (1, 8, 2, 2)
     expected = student[..., :8].permute(0, 3, 1, 2)
     torch.testing.assert_close(features, expected)
 
 
-def test_projected_register_dim_requires_bottleneck() -> None:
-    """Selecting the student without the bottleneck output is rejected up front."""
-    with pytest.raises(ValueError, match="use_register_bottleneck_output"):
+def test_projected_location_token_dim_requires_location_token_output() -> None:
+    """Selecting the student without the location-token output is rejected up front."""
+    with pytest.raises(ValueError, match="use_location_token_output"):
         OlmoEarth(
             checkpoint_path="tests/unit/models/olmoearth_pretrain/",
             random_initialization=True,
             patch_size=4,
             embedding_size=128,
-            projected_register_dim=8,
+            projected_location_token_dim=8,
         )
 
 
-def test_projected_register_dim_without_student_head() -> None:
-    """A checkpoint with no student head fails loudly rather than using the teacher."""
-    model = _register_model(
-        _stub_output(torch.zeros(1, 2, 2, 16)), projected_register_dim=8
+def test_projected_location_token_dim_without_student_head() -> None:
+    """A checkpoint with no student fails loudly rather than using the location tokens."""
+    model = _location_token_model(
+        _stub_output(torch.zeros(1, 2, 2, 16)), projected_location_token_dim=8
     )
-    with pytest.raises(ValueError, match="student_registers"):
-        model(_register_context())
+    with pytest.raises(ValueError, match="student_location_tokens"):
+        model(_location_token_context())
