@@ -184,7 +184,7 @@ data:
             class_path: rslearn.train.tasks.per_pixel_timestep.PerPixelTimestepTask
             init_args:
               num_classes: 12
-    train_config:
+    default_config:
       transforms:
         - class_path: rslearn.change_alerts.sampler.ChangeTimeSeriesSampler
           init_args:
