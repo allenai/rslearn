@@ -1,0 +1,224 @@
+# Model config for change alerts, used for both training and prediction. Set
+# DATASET_PATH to the training dataset (config_train.json) for `model fit`, and to the
+# prediction dataset (config_predict.json) for `model predict`.
+model:
+  class_path: rslearn.train.lightning_module.RslearnLightningModule
+  init_args:
+    model:
+      class_path: rslearn.models.multitask.MultiTaskModel
+      init_args:
+        encoder:
+          # Output one token per timestep (a TokenFeatureMaps) instead of pooling over
+          # timesteps. With a v1.2 model and only Sentinel-2, the tokens are exactly
+          # the timesteps in chronological order.
+          - class_path: rslearn.models.olmoearth_pretrain.model.OlmoEarth
+            init_args:
+              model_id: OLMOEARTH_V1_2_BASE
+              patch_size: 4
+              token_pooling: false
+              use_legacy_timestamps: false
+        decoders:
+          category:
+            - class_path: rslearn.models.attention_pooling.SimpleAttentionPool
+              init_args:
+                in_dim: 768
+            - class_path: rslearn.models.conv.Conv
+              init_args:
+                in_channels: 768
+                out_channels: 256
+                kernel_size: 3
+            - class_path: rslearn.models.conv.Conv
+              init_args:
+                in_channels: 256
+                out_channels: 3
+                kernel_size: 1
+                activation:
+                  class_path: torch.nn.Identity
+            - class_path: rslearn.models.upsample.Upsample
+              init_args:
+                scale_factor: 4
+                mode: bilinear
+            - class_path: rslearn.train.tasks.segmentation.SegmentationHead
+          timestep:
+            # One logit per timestep. Padded timesteps (when an example in the batch
+            # has fewer images) get a large negative logit so they are never predicted.
+            - class_path: rslearn.models.tokens_to_channels.TokensToChannels
+              init_args:
+                in_dim: 768
+                out_dim: 1
+                mask_fill_value: -10000.0
+            - class_path: rslearn.models.upsample.Upsample
+              init_args:
+                scale_factor: 4
+                mode: bilinear
+            - class_path: rslearn.train.tasks.per_pixel_timestep.PerPixelTimestepHead
+              init_args:
+                input_key: sentinel2_l2a
+                mode: AFTER
+    optimizer:
+      class_path: rslearn.models.olmoearth_pretrain.optimizer.LayerDecayAdamW
+      init_args:
+        lr: 0.0001
+data:
+  class_path: rslearn.train.data_module.RslearnDataModule
+  init_args:
+    path: ${DATASET_PATH}
+    inputs:
+      # One input per slot. Only freq_0 is required: the prediction dataset only has
+      # the frequent_0 layer, so freq_1 to freq_3 are skipped there.
+      freq_0:
+        data_type: raster
+        layers: [frequent_0]
+        bands: [B02, B03, B04, B08, B05, B06, B07, B8A, B11, B12, B01, B09]
+        passthrough: true
+        dtype: FLOAT32
+        load_all_layers: true
+        load_all_item_groups: true
+      freq_1:
+        data_type: raster
+        layers: [frequent_1]
+        bands: [B02, B03, B04, B08, B05, B06, B07, B8A, B11, B12, B01, B09]
+        passthrough: true
+        dtype: FLOAT32
+        load_all_layers: true
+        load_all_item_groups: true
+        required: false
+      freq_2:
+        data_type: raster
+        layers: [frequent_2]
+        bands: [B02, B03, B04, B08, B05, B06, B07, B8A, B11, B12, B01, B09]
+        passthrough: true
+        dtype: FLOAT32
+        load_all_layers: true
+        load_all_item_groups: true
+        required: false
+      freq_3:
+        data_type: raster
+        layers: [frequent_3]
+        bands: [B02, B03, B04, B08, B05, B06, B07, B8A, B11, B12, B01, B09]
+        passthrough: true
+        dtype: FLOAT32
+        load_all_layers: true
+        load_all_item_groups: true
+        required: false
+      infreq:
+        data_type: raster
+        layers: [infrequent]
+        bands: [B02, B03, B04, B08, B05, B06, B07, B8A, B11, B12, B01, B09]
+        passthrough: true
+        dtype: FLOAT32
+        load_all_layers: true
+        load_all_item_groups: true
+      # The targets are skipped during prediction (skip_targets below).
+      label_category:
+        data_type: raster
+        layers: [label_category]
+        bands: [label]
+        is_target: true
+        dtype: INT32
+      change_day:
+        data_type: raster
+        layers: [label_change_day]
+        bands: [label]
+        is_target: true
+        dtype: INT32
+    task:
+      class_path: rslearn.train.tasks.multi_task.MultiTask
+      init_args:
+        input_mapping:
+          category:
+            label_category: targets
+          timestep:
+            change_day: targets
+        tasks:
+          # 0 is invalid, 1 is no change, 2 is change.
+          category:
+            class_path: rslearn.train.tasks.segmentation.SegmentationTask
+            init_args:
+              num_classes: 3
+              nodata_value: 0
+              other_metrics:
+                balanced_accuracy:
+                  class_path: rslearn.change_alerts.metrics.BalancedAccuracy
+                  init_args:
+                    num_classes: 3
+                change_auroc:
+                  class_path: rslearn.change_alerts.metrics.ChangeAUROC
+                  init_args:
+                    none_class: 1
+          # 8 infrequent images plus 4 frequent images.
+          timestep:
+            class_path: rslearn.train.tasks.per_pixel_timestep.PerPixelTimestepTask
+            init_args:
+              num_classes: 12
+              enable_accuracy_metric: false
+              other_metrics:
+                within1:
+                  class_path: rslearn.change_alerts.metrics.TimestepToleranceAccuracy
+                  init_args:
+                    tolerance: 1
+    batch_size: 8
+    num_workers: 16
+    default_config:
+      transforms:
+        # Build the sentinel2_l2a time series from one slot plus the infrequent
+        # history. During prediction, only freq_0 is present, so it is always used.
+        - class_path: rslearn.change_alerts.sampler.ChangeTimeSeriesSampler
+          init_args:
+            frequent_keys: [freq_0, freq_1, freq_2, freq_3]
+            infrequent_key: infreq
+            num_infrequent: 8
+            output_key: sentinel2_l2a
+            # Only needed if change dates vary within a window.
+            category_target: category
+            change_day_target: timestep
+        - class_path: rslearn.models.olmoearth_pretrain.norm.OlmoEarthNormalize
+          init_args:
+            band_names:
+              sentinel2_l2a: [B02, B03, B04, B08, B05, B06, B07, B8A, B11, B12, B01, B09]
+    train_config:
+      tags:
+        split: train
+    val_config:
+      tags:
+        split: val
+    test_config:
+      tags:
+        split: val
+    predict_config:
+      # Apply sliding window inference on large prediction windows, with crops that
+      # match the 64x64 training windows.
+      load_all_crops: true
+      crop_size: 64
+      overlap_pixels: 8
+      skip_targets: true
+trainer:
+  max_epochs: 100
+  callbacks:
+    # The output layers must also be in the training dataset config, since the
+    # writers load them when they are set up, including during `model fit`.
+    - class_path: rslearn.train.prediction_writer.RslearnWriter
+      init_args:
+        output_layer: output_category
+        selector: [category]
+        merger:
+          class_path: rslearn.train.prediction_writer.RasterMerger
+          init_args:
+            overlap_pixels: 8
+    # The change day output is the number of days since 1970-01-01 of the predicted
+    # image, which is only meaningful where output_category is the change class.
+    - class_path: rslearn.train.prediction_writer.RslearnWriter
+      init_args:
+        output_layer: output_change_day
+        selector: [timestep]
+        merger:
+          class_path: rslearn.train.prediction_writer.RasterMerger
+          init_args:
+            overlap_pixels: 8
+    - class_path: rslearn.train.callbacks.checkpointing.ManagedBestLastCheckpoint
+      init_args:
+        monitor: val_loss
+        mode: min
+project_name: ${PROJECT_NAME}
+run_name: ${RUN_NAME}
+management_dir: ${MANAGEMENT_DIR}

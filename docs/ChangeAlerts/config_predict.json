@@ -1,0 +1,104 @@
+{
+  "layers": {
+    "frequent_0": {
+      "band_sets": [
+        {
+          "bands": [
+            "B02",
+            "B03",
+            "B04",
+            "B08",
+            "B05",
+            "B06",
+            "B07",
+            "B8A",
+            "B11",
+            "B12",
+            "B01",
+            "B09"
+          ],
+          "dtype": "uint16"
+        }
+      ],
+      "data_source": {
+        "class_path": "rslearn.data_sources.planetary_computer.Sentinel2",
+        "duration": "63d",
+        "ingest": false,
+        "init_args": {
+          "harmonize": true,
+          "sort_by": "eo:cloud_cover"
+        },
+        "query_config": {
+          "max_matches": 4,
+          "min_matches": 1,
+          "per_period_mosaic_reverse_time_order": false,
+          "period_duration": "7d",
+          "space_mode": "MOSAIC"
+        },
+        "time_offset": "-63d"
+      },
+      "type": "raster"
+    },
+    "infrequent": {
+      "band_sets": [
+        {
+          "bands": [
+            "B02",
+            "B03",
+            "B04",
+            "B08",
+            "B05",
+            "B06",
+            "B07",
+            "B8A",
+            "B11",
+            "B12",
+            "B01",
+            "B09"
+          ],
+          "dtype": "uint16"
+        }
+      ],
+      "data_source": {
+        "class_path": "rslearn.data_sources.planetary_computer.Sentinel2",
+        "duration": "900d",
+        "ingest": false,
+        "init_args": {
+          "harmonize": true,
+          "sort_by": "eo:cloud_cover"
+        },
+        "query_config": {
+          "max_matches": 10,
+          "per_period_mosaic_reverse_time_order": false,
+          "period_duration": "90d",
+          "space_mode": "MOSAIC"
+        },
+        "time_offset": "-963d"
+      },
+      "type": "raster"
+    },
+    "output_category": {
+      "band_sets": [
+        {
+          "bands": [
+            "output"
+          ],
+          "dtype": "uint8"
+        }
+      ],
+      "type": "raster"
+    },
+    "output_change_day": {
+      "band_sets": [
+        {
+          "bands": [
+            "output"
+          ],
+          "dtype": "uint16",
+          "nodata_value": 65535
+        }
+      ],
+      "type": "raster"
+    }
+  }
+}
