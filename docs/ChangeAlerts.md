@@ -326,7 +326,9 @@ def make_alerts(category, change_day, last_alert_day, run_day, transform, min_pi
 - `BalancedAccuracy`: the mean per-class recall of the category, over the classes
   present in the targets.
 - `ChangeAUROC`: the AUROC of change versus no change, scoring each pixel by one minus
-  the probability of the no change class (`none_class`).
+  the probability of the no change class (`none_class`). By default it stores the
+  scores at all valid pixels to compute the exact AUROC; set `thresholds` (e.g. to
+  200) to compute a binned AUROC with constant memory instead.
 - `TimestepToleranceAccuracy`: for the timestep task, the fraction of change pixels
   whose predicted timestep is within `tolerance` of the target timestep. Unlike the
   built-in accuracy, it does not require the logits to have exactly `num_classes`

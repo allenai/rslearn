@@ -9,7 +9,7 @@ from typing import Any
 
 import torch
 from torchmetrics import Metric
-from torchmetrics.functional.classification import binary_auroc
+from torchmetrics.classification import BinaryAUROC
 
 
 def _iter_valid(
@@ -66,51 +66,43 @@ class BalancedAccuracy(Metric):
         return (self.correct[present] / self.total[present]).mean()
 
 
-class ChangeAUROC(Metric):
+class ChangeAUROC(BinaryAUROC):
     """AUROC of detecting change versus no change from the category probabilities.
 
     The score is one minus the probability of the no change category, and the label is
     whether the target category is a change category.
     """
 
-    scores: list[torch.Tensor] | torch.Tensor
-    labels: list[torch.Tensor] | torch.Tensor
-
-    def __init__(self, none_class: int = 1) -> None:
+    def __init__(
+        self,
+        none_class: int = 1,
+        thresholds: int | list[float] | None = None,
+    ) -> None:
         """Create a new ChangeAUROC.
 
         Args:
             none_class: the class ID of the no change category.
+            thresholds: passed to BinaryAUROC. If None, all scores at valid pixels are
+                stored and the exact AUROC is computed. If set (e.g. to the number of
+                thresholds), a binned AUROC that uses constant memory is computed.
         """
-        super().__init__()
+        super().__init__(thresholds=thresholds)
         self.none_class = none_class
-        self.add_state("scores", default=[], dist_reduce_fx="cat")
-        self.add_state("labels", default=[], dist_reduce_fx="cat")
 
-    def update(
+    def update(  # type: ignore[override]
         self, preds: list[torch.Tensor] | torch.Tensor, targets: list[dict[str, Any]]
     ) -> None:
         """Accumulate the scores and labels at valid pixels."""
-        assert isinstance(self.scores, list) and isinstance(self.labels, list)
-        for probs, labels in _iter_valid(preds, targets):
-            self.scores.append(1 - probs[:, self.none_class].float())
-            self.labels.append((labels != self.none_class).long())
-
-    def compute(self) -> torch.Tensor:
-        """Compute the AUROC."""
-        if len(self.scores) == 0:
-            return torch.tensor(0.0)
-        # After a distributed sync, the list states are concatenated into tensors.
-        scores = (
-            torch.cat(self.scores) if isinstance(self.scores, list) else self.scores
+        valid = _iter_valid(preds, targets)
+        if not valid:
+            return
+        scores = torch.cat(
+            [1 - probs[:, self.none_class].float() for probs, _ in valid]
         )
-        labels = (
-            torch.cat(self.labels) if isinstance(self.labels, list) else self.labels
-        )
-        if labels.min() == labels.max():
-            # AUROC is undefined with a single class.
-            return torch.tensor(0.0)
-        return binary_auroc(scores, labels)
+        labels = torch.cat([(labels != self.none_class).long() for _, labels in valid])
+        if len(labels) == 0:
+            return
+        super().update(scores, labels)
 
 
 class TimestepToleranceAccuracy(Metric):
