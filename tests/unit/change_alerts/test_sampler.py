@@ -29,15 +29,28 @@ INFREQUENT_VALUE = 100
 
 
 def _series(
-    start: datetime, period: timedelta, count: int, value: float = 0
+    start: datetime,
+    period: timedelta,
+    count: int,
+    value: float = 0,
+    instant_offset: timedelta | None = None,
 ) -> RasterImage:
     """Make a chronological series of count images starting at start.
 
     Each image covers one period, and every pixel in every band of image i is set to
     value + i, so the selected images can be identified from the output pixel values.
     For example, with value=100, the pixels of the third image are all 102.
+
+    If instant_offset is set, each timestamp is instead the single instant
+    instant_offset after the period start, like a mosaic whose timestamp is that of
+    one of its scenes.
     """
-    timestamps = [(start + i * period, start + (i + 1) * period) for i in range(count)]
+    if instant_offset is None:
+        timestamps = [
+            (start + i * period, start + (i + 1) * period) for i in range(count)
+        ]
+    else:
+        timestamps = [(start + i * period + instant_offset,) * 2 for i in range(count)]
     image = torch.arange(count, dtype=torch.float32)[None, :, None, None] + value
     return RasterImage(image.expand(2, count, H, W).clone(), timestamps=timestamps)
 
@@ -89,6 +102,7 @@ SAMPLER_ARGS: dict[str, Any] = {
     "infrequent_key": "infreq",
     "num_infrequent": 8,
 }
+STAND_IN_GAP = timedelta(days=45)
 MASKING_ARGS: dict[str, Any] = {
     "category_target": "category",
     "change_day_target": "timestep",
@@ -136,18 +150,54 @@ def test_fewer_than_num_frequent() -> None:
 
 def test_stand_in_when_gap_is_large() -> None:
     """The frequent image before the pick replaces the oldest infrequent image."""
-    sampler = ChangeTimeSeriesSampler(**SAMPLER_ARGS, select="latest")
-    # The pick starts 7 weeks (49 days) after the infrequent images end.
+    sampler = ChangeTimeSeriesSampler(
+        **SAMPLER_ARGS, select="latest", stand_in_min_gap=STAND_IN_GAP
+    )
+    # The pick starts 7 weeks (49 days) after the first frequent image.
     input_dict, _ = sampler(_inputs(11), _targets())
     assert _values(input_dict) == INFREQUENT_VALUES[1:] + [6, 7, 8, 9, 10]
 
 
 def test_no_stand_in_when_gap_is_small() -> None:
-    """No stand-in is used if the gap is less than half the infrequent period."""
-    sampler = ChangeTimeSeriesSampler(**SAMPLER_ARGS, select="latest")
-    # The pick starts 5 weeks (35 days) after the infrequent images end.
+    """No stand-in is used if the gap is less than stand_in_min_gap."""
+    sampler = ChangeTimeSeriesSampler(
+        **SAMPLER_ARGS, select="latest", stand_in_min_gap=STAND_IN_GAP
+    )
+    # The pick starts 5 weeks (35 days) after the first frequent image.
     input_dict, _ = sampler(_inputs(9), _targets())
     assert _values(input_dict) == INFREQUENT_VALUES + [5, 6, 7, 8]
+
+
+def test_no_stand_in_by_default() -> None:
+    """Without stand_in_min_gap, no stand-in is used."""
+    sampler = ChangeTimeSeriesSampler(**SAMPLER_ARGS, select="latest")
+    input_dict, _ = sampler(_inputs(11), _targets())
+    assert _values(input_dict) == INFREQUENT_VALUES + [7, 8, 9, 10]
+
+
+def test_stand_in_with_instant_timestamps() -> None:
+    """The stand-in rule works when mosaic timestamps are single scene times."""
+    sampler = ChangeTimeSeriesSampler(
+        **SAMPLER_ARGS, select="latest", stand_in_min_gap=STAND_IN_GAP
+    )
+    for num_images, expected in [
+        (9, INFREQUENT_VALUES + [5, 6, 7, 8]),
+        (11, INFREQUENT_VALUES[1:] + [6, 7, 8, 9, 10]),
+    ]:
+        input_dict = {
+            "freq": _series(
+                WINDOW_START, WEEK, num_images, instant_offset=timedelta(days=2)
+            ),
+            "infreq": _series(
+                WINDOW_START - 8 * QUARTER,
+                QUARTER,
+                8,
+                value=INFREQUENT_VALUE,
+                instant_offset=timedelta(days=30),
+            ),
+        }
+        input_dict, _ = sampler(input_dict, _targets())
+        assert _values(input_dict) == expected
 
 
 def test_random_start_covers_window() -> None:
@@ -182,7 +232,9 @@ def test_reduction_keeps_latest() -> None:
 def test_reduction_never_uses_dropped_image_as_stand_in() -> None:
     """The stand-in is the image just before the original pick."""
     random.seed(0)
-    sampler = ChangeTimeSeriesSampler(**SAMPLER_ARGS, full_frequent_probability=0)
+    sampler = ChangeTimeSeriesSampler(
+        **SAMPLER_ARGS, full_frequent_probability=0, stand_in_min_gap=STAND_IN_GAP
+    )
     num_stand_ins = 0
     for _ in range(200):
         input_dict, _ = sampler(_inputs(16), _targets())

@@ -48,8 +48,8 @@ class ChangeTimeSeriesSampler(Transform):
        uniform between 1 and num_frequent - 1. This simulates prediction windows where
        some frequent periods have no images.
     3. Take the latest num_infrequent infrequent images that end at or before the start
-       of the pick. If the gap between the last of them and the pick start is at least
-       half of its duration, the frequent image just before the pick (if any) is used
+       of the pick. If stand_in_min_gap is set and the pick starts at least that long
+       after the first frequent image, the frequent image just before the pick is used
        as a stand-in for the most recent infrequent image, replacing the oldest one.
        The frequent images dropped in step 2 are never used as the stand-in.
     4. Concatenate the infrequent images (and stand-in) and the kept frequent images
@@ -75,6 +75,7 @@ class ChangeTimeSeriesSampler(Transform):
         output_key: str = "image",
         select: Literal["random", "latest"] = "random",
         full_frequent_probability: float = 0.5,
+        stand_in_min_gap: timedelta | None = None,
         category_target: str | None = None,
         change_day_target: str | None = None,
     ) -> None:
@@ -93,6 +94,13 @@ class ChangeTimeSeriesSampler(Transform):
             full_frequent_probability: with select="random", the probability of
                 keeping all of the picked frequent images. Otherwise fewer are kept.
                 Set to 1 to always keep all of them.
+            stand_in_min_gap: if set, use a stand-in for the most recent infrequent
+                image when the pick starts at least this long after the first frequent
+                image, e.g. half of the infrequent period. The gap is measured from the
+                first frequent image rather than from the infrequent images, since
+                mosaic timestamps are the time of a single scene within the period, and
+                the frequent layer starts where the infrequent layer ends. If None, no
+                stand-in is used.
             category_target: the category target whose valid mask is cleared at
                 pixels whose change is outside the time series. Must be set together
                 with change_day_target. This is only needed if change dates vary
@@ -121,6 +129,7 @@ class ChangeTimeSeriesSampler(Transform):
         self.output_key = output_key
         self.select = select
         self.full_frequent_probability = full_frequent_probability
+        self.stand_in_min_gap = stand_in_min_gap
         self.category_target = category_target
         self.change_day_target = change_day_target
 
@@ -164,18 +173,23 @@ class ChangeTimeSeriesSampler(Transform):
             if end <= pick_start
         ]
         history = [(infrequent, idx) for idx in eligible[-self.num_infrequent :]]
-        if not eligible or pick_start_idx == 0:
+        if (
+            self.stand_in_min_gap is None
+            or pick_start_idx == 0
+            or pick_start - frequent.timestamps[0][0] < self.stand_in_min_gap
+        ):
             return history
 
-        last_start, last_end = infrequent.timestamps[eligible[-1]]
         stand_in_idx = pick_start_idx - 1
-        if (
-            pick_start - last_end >= (last_end - last_start) / 2
-            and frequent.timestamps[stand_in_idx][0] >= last_end
+        # Keep the time series chronological.
+        if eligible and (
+            frequent.timestamps[stand_in_idx][0]
+            < infrequent.timestamps[eligible[-1]][1]
         ):
-            if len(history) == self.num_infrequent:
-                history = history[1:]
-            history.append((frequent, stand_in_idx))
+            return history
+        if len(history) == self.num_infrequent:
+            history = history[1:]
+        history.append((frequent, stand_in_idx))
         return history
 
     def forward(

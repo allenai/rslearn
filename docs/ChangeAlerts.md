@@ -59,8 +59,9 @@ quarterly infrequent images, as in the [example configs](#example-configs).
   `n < N` images of the pick, to simulate prediction windows where some frequent
   periods have no images.
 - **Stand-in image**: the frequent image just before the pick, used in place of the
-  most recent infrequent image when the gap between the infrequent images and the pick
-  is at least half an infrequent period.
+  most recent infrequent image when the pick starts at least `stand_in_min_gap` (e.g.
+  half an infrequent period) after the first frequent image, i.e. when there would
+  otherwise be a large gap between the infrequent images and the pick.
 - **Time series**: the model input built by the sampler: the infrequent images (and
   stand-in image, if any) followed by the kept frequent images of the pick.
 - **Last alert date** and **margin**: see [Alerting](#alerting).
@@ -162,11 +163,12 @@ from the frequent input (`frequent_key`) and the infrequent input (`infrequent_k
    keeps only the latest `n` images, with `n` uniform between 1 and
    `num_frequent - 1`.
 3. Take the latest `num_infrequent` infrequent images that end at or before the start
-   of the pick. If the gap between the last of them and the pick start is at least
-   half of an infrequent period, the frequent image just before the pick is added as a
-   stand-in image, replacing the oldest infrequent image. In a training window, this
-   applies to the later picks; in a prediction window, the gap is less than `N`
-   frequent periods (e.g. 28 days), so it typically does not apply.
+   of the pick. If `stand_in_min_gap` is set (e.g. to 45 days, half of an infrequent
+   period) and the pick starts at least that long after the first frequent image, the
+   frequent image just before the pick is added as a stand-in image, replacing the
+   oldest infrequent image. In a training window, this applies to the later picks; in
+   a prediction window, the pick always starts at the first frequent image, so it does
+   not apply.
 4. Concatenate the infrequent images, stand-in image (if any), and kept frequent
    images chronologically into `input_dict[output_key]`.
 
@@ -174,6 +176,12 @@ The images dropped in a reduced pick are treated as missing: the infrequent imag
 stand-in image are still chosen relative to the start of the original pick. So the
 reduced pick looks like a prediction window where the earlier frequent periods have no
 images.
+
+The gap for the stand-in image is measured from the first frequent image rather than
+from the infrequent images, because the timestamp of each mosaic is the time of one of
+its scenes (which can be anywhere within its period), not the period itself. Since the
+frequent layer starts where the infrequent layer ends, the first frequent image is
+within about one frequent period of the end of the infrequent images.
 
 The timestep at which the change appears is predicted with `PerPixelTimestepTask`, using
 the change day raster as its target, and `PerPixelTimestepHead` with `mode: AFTER`, which
@@ -251,6 +259,7 @@ data:
             infrequent_key: infreq
             num_infrequent: 8
             output_key: sentinel2_l2a
+            stand_in_min_gap: "45 days, 0:00:00"
             # Only needed if change dates vary within a window.
             category_target: category
             change_day_target: timestep
