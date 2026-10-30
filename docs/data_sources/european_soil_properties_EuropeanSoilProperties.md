@@ -22,6 +22,7 @@ Data is read directly from the public COGs, so set `"ingest": false`:
 {
   "soil_texture": {
     "type": "raster",
+    "resampling_method": "nearest",
     "band_sets": [
       {
         "dtype": "float32",
@@ -36,6 +37,11 @@ Data is read directly from the public COGs, so set `"ingest": false`:
   }
 }
 ```
+
+Nearest-neighbour resampling is required to keep texture values and their validity
+indicators aligned without interpolating across empty pixels. Other resampling
+methods raise an error. When downsampling, each output pixel takes the composition
+of one source pixel rather than an area average.
 
 On first initialization, rslearn reads the headers of all 122 COGs to discover
 their exact bounds and saves `tile_index.json` in `cache_dir`. Subsequent

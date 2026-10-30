@@ -22,6 +22,7 @@ from upath import UPath
 
 import rslearn.data_sources.utils
 from rslearn.config import DType, QueryConfig
+from rslearn.config.dataset import ResamplingMethod
 from rslearn.const import WGS84_PROJECTION
 from rslearn.data_sources.data_source import (
     DataSourceContext,
@@ -83,6 +84,11 @@ class EuropeanSoilProperties(
                 raise ValueError(
                     "EuropeanSoilProperties requires dtype=float32 because values "
                     "are scaled to percentages and empty pixels are NaN"
+                )
+            if context.layer_config.resampling_method != ResamplingMethod.NEAREST:
+                raise ValueError(
+                    "EuropeanSoilProperties requires resampling_method=nearest "
+                    "to keep texture values aligned with their validity indicators"
                 )
 
         self._grid_index = GridIndex(GRID_INDEX_CELL_SIZE)
@@ -173,11 +179,16 @@ class EuropeanSoilProperties(
         bands: list[str],
         projection: Projection,
         bounds: PixelBounds,
-        resampling: Resampling = Resampling.bilinear,
+        resampling: Resampling = Resampling.nearest,
     ) -> RasterArray:
         """Read, reproject, mask, and scale the three texture bands."""
         if bands != TEXTURE_BANDS:
             raise ValueError(f"expected bands {TEXTURE_BANDS}, got {bands}")
+
+        if resampling != Resampling.nearest:
+            raise ValueError(
+                "EuropeanSoilProperties requires nearest-neighbour resampling"
+            )
 
         typed_item = cast(Item, item)
         wanted_transform = affine.Affine(
@@ -189,8 +200,9 @@ class EuropeanSoilProperties(
             bounds[1] * projection.y_resolution,
         )
 
-        with rasterio.open(self.get_asset_url(typed_item, "textures")) as src:
-            with rasterio.vrt.WarpedVRT(
+        with (
+            rasterio.open(self.get_asset_url(typed_item, "textures")) as src,
+            rasterio.vrt.WarpedVRT(
                 src,
                 crs=projection.crs,
                 transform=wanted_transform,
@@ -198,29 +210,18 @@ class EuropeanSoilProperties(
                 height=bounds[3] - bounds[1],
                 dtype="float32",
                 resampling=resampling,
-            ) as vrt:
-                raw_values = vrt.read(indexes=[1, 2, 3])
+            ) as vrt,
+        ):
+            data = vrt.read(indexes=[1, 2, 3, 4, 5, 6])
 
-            # The provider defines an empty pixel as a value/uncertainty pair that
-            # is both zero. Always resample those pairs with nearest-neighbour so
-            # interpolation does not bleed values into empty source pixels.
-            with rasterio.vrt.WarpedVRT(
-                src,
-                crs=projection.crs,
-                transform=wanted_transform,
-                width=bounds[2] - bounds[0],
-                height=bounds[3] - bounds[1],
-                resampling=Resampling.nearest,
-            ) as mask_vrt:
-                mask_data = mask_vrt.read(indexes=[1, 2, 3, 4, 5, 6])
-
-        values = raw_values.astype(np.float32) * PERCENT_SCALE
-        empty = (mask_data[:3] == 0) & (mask_data[3:] == 0)
+        values = data[:3] * PERCENT_SCALE
+        # The provider defines an empty pixel as a value/uncertainty pair that
+        # is both zero. Nearest-neighbour keeps each pair from the same pixel.
+        empty = (data[:3] == 0) & (data[3:] == 0)
         values[empty] = np.nan
 
         # The model produces compositional fractions summing to one before they are
-        # quantized to bytes. Restore that invariant after reprojection; this also
-        # prevents interpolation with adjacent empty pixels from depressing the sum.
+        # quantized to bytes. Correct that quantization so valid pixels sum to 100%.
         valid = np.all(np.isfinite(values), axis=0)
         totals = values.sum(axis=0)
         normalizable = valid & (totals > 0)

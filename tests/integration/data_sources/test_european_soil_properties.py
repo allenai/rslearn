@@ -21,6 +21,7 @@ from rslearn.config import (
     QueryConfig,
     SpaceMode,
 )
+from rslearn.config.dataset import ResamplingMethod
 from rslearn.const import WGS84_PROJECTION
 from rslearn.data_sources.data_source import DataSourceContext, Item
 from rslearn.data_sources.european_soil_properties import (
@@ -133,8 +134,12 @@ def test_requires_float32_texture_band_set(cache_dir: str) -> None:
         )
 
 
+@pytest.mark.parametrize("resolution", [1, 0.5, 2])
 def test_read_raster_scales_and_masks_empty_pairs(
-    tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch, cache_dir: str
+    tmp_path: pathlib.Path,
+    monkeypatch: pytest.MonkeyPatch,
+    cache_dir: str,
+    resolution: float,
 ) -> None:
     geotiff_path = _write_texture_geotiff(tmp_path / "textures.tif")
     data_source = EuropeanSoilProperties(cache_dir=cache_dir)
@@ -148,24 +153,38 @@ def test_read_raster_scales_and_masks_empty_pairs(
         lambda item, asset_key: str(geotiff_path),
     )
 
+    size = int(2 / resolution)
     raster = data_source.read_raster(
         layer_name="soil_texture",
         item=item,
         bands=TEXTURE_BANDS,
-        projection=Projection(CRS.from_epsg(4326), 1, -1),
-        bounds=(0, -2, 2, 0),
-        resampling=Resampling.nearest,
+        projection=Projection(CRS.from_epsg(4326), resolution, -resolution),
+        bounds=(0, -size, size, 0),
     )
     array = raster.get_chw_array()
 
-    assert array.shape == (3, 2, 2)
-    expected = np.array([51, 101, 102]) * PERCENT_SCALE
-    expected *= 100 / expected.sum()
-    np.testing.assert_allclose(array[:, 0, 0], expected)
-    assert np.isnan(array[:, 0, 1]).all()
-    # A zero texture value with non-zero uncertainty is valid, not nodata.
-    np.testing.assert_allclose(array[:, 1, 0], [0, 0, 100])
-    np.testing.assert_allclose(array[:, 1, 1].sum(), 100)
+    expected = (
+        np.array(
+            [
+                [[51, np.nan], [0, 25]],
+                [[101, np.nan], [0, 75]],
+                [[102, np.nan], [255, 155]],
+            ],
+            dtype=np.float32,
+        )
+        * PERCENT_SCALE
+    )
+    expected *= 100 / expected.sum(axis=0)
+    if resolution == 2:
+        # The coarser pixel selects the bottom-right sample, without averaging
+        # the empty top-right pixel or the other valid compositions into it.
+        expected = expected[:, 1:, 1:]
+    else:
+        repeats = int(1 / resolution)
+        expected = expected.repeat(repeats, axis=1).repeat(repeats, axis=2)
+    assert array.shape == (3, size, size)
+    # Resizing must preserve sampled compositions without blending.
+    np.testing.assert_allclose(array, expected, equal_nan=True)
     assert np.isnan(raster.metadata.nodata_value)
 
 
@@ -233,6 +252,7 @@ def test_instantiates_from_layer_config(cache_dir: str) -> None:
     config = LayerConfig.model_validate(
         {
             "type": "raster",
+            "resampling_method": "nearest",
             "band_sets": [{"dtype": "float32", "bands": TEXTURE_BANDS}],
             "data_source": {
                 "name": "rslearn.data_sources.european_soil_properties.EuropeanSoilProperties",
@@ -244,3 +264,51 @@ def test_instantiates_from_layer_config(cache_dir: str) -> None:
     source = config.instantiate_data_source()
     assert isinstance(source, EuropeanSoilProperties)
     assert source.get_item_by_name("Tile_69").name == "Tile_69"
+
+
+@pytest.mark.parametrize(
+    "resampling",
+    [
+        None,
+        ResamplingMethod.BILINEAR,
+        ResamplingMethod.CUBIC,
+        ResamplingMethod.CUBIC_SPLINE,
+    ],
+)
+def test_rejects_non_nearest_layer_config(
+    cache_dir: str, resampling: ResamplingMethod | None
+) -> None:
+    config = LayerConfig(
+        type=LayerType.RASTER,
+        band_sets=[BandSetConfig(dtype=DType.FLOAT32, bands=TEXTURE_BANDS)],
+    )
+    if resampling is not None:
+        config = config.model_copy(update={"resampling_method": resampling})
+    with (
+        patch("rasterio.open") as open_cog,
+        pytest.raises(ValueError, match="resampling_method=nearest"),
+    ):
+        EuropeanSoilProperties(
+            cache_dir=cache_dir, context=DataSourceContext(layer_config=config)
+        )
+    open_cog.assert_not_called()
+
+
+@pytest.mark.parametrize(
+    "resampling", [Resampling.bilinear, Resampling.cubic, Resampling.average]
+)
+def test_rejects_non_nearest_read(cache_dir: str, resampling: Resampling) -> None:
+    source = EuropeanSoilProperties(cache_dir=cache_dir)
+    with (
+        patch("rasterio.open") as open_cog,
+        pytest.raises(ValueError, match="nearest-neighbour"),
+    ):
+        source.read_raster(
+            layer_name="soil_texture",
+            item=source.get_item_by_name("Tile_69"),
+            bands=TEXTURE_BANDS,
+            projection=Projection(CRS.from_epsg(4326), 1, -1),
+            bounds=(0, -2, 2, 0),
+            resampling=resampling,
+        )
+    open_cog.assert_not_called()
