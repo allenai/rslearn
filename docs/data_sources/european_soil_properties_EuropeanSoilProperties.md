@@ -1,0 +1,67 @@
+## rslearn.data_sources.european_soil_properties.EuropeanSoilProperties
+
+This data source provides the 10 m European clay, sand, and silt maps published by
+BOKU University with the data descriptor [High-resolution European soil property
+maps based on LUCAS and AlphaEarth Foundations satellite
+embeddings](https://doi.org/10.1038/s41597-026-08273-1).
+
+The maps represent the 0--20 cm soil layer and cover the EU-27 and the United
+Kingdom. They were produced from 2018 covariates and LUCAS 2009 soil texture
+samples. The dataset is distributed as 122 EPSG:4326 Cloud-Optimized GeoTIFF tiles
+through the [version 2 dataset record](https://doi.org/10.5281/zenodo.21281853).
+
+rslearn reads only the required COG byte ranges during materialization and preserves
+the original byte-encoded texture values (0--255), without percentage conversion or
+renormalization. Values are returned as `float32`, which represents every source
+byte exactly, so empty pixels can be represented as `NaN`. A zero texture value
+with nonzero uncertainty remains a valid zero. The source is licensed under
+CC BY 4.0; users should cite the paper and dataset record.
+
+### Configuration
+
+Data is read directly from the public COGs, so set `"ingest": false`:
+
+```jsonc
+{
+  "soil_texture": {
+    "type": "raster",
+    "resampling_method": "nearest",
+    "band_sets": [
+      {
+        "dtype": "float32",
+        "bands": ["clay", "sand", "silt"]
+      }
+    ],
+    "data_source": {
+      "name": "rslearn.data_sources.european_soil_properties.EuropeanSoilProperties",
+      "ingest": false,
+      "cache_dir": "cache/european_soil_properties"
+    }
+  }
+}
+```
+
+Nearest-neighbour resampling is required to keep texture values and their validity
+indicators aligned without interpolating across empty pixels. Other resampling
+methods raise an error. When downsampling, each output pixel takes the composition
+of one source pixel rather than an area average.
+
+On first initialization, rslearn reads the headers of all 122 COGs to discover
+their exact bounds and saves `tile_index.json` in `cache_dir`. Subsequent
+initializations reuse that index without metadata requests. Relative cache paths
+are resolved against the dataset directory. Delete the index to refresh it. The
+tiles are approximately three degrees across, but their bounds do not form an
+exact 3-degree grid.
+
+### Available Bands
+
+| Band | Unit | Description |
+|---|---|---|
+| `clay` | byte-encoded fraction (0--255) | Predicted clay fraction |
+| `sand` | byte-encoded fraction (0--255) | Predicted sand fraction |
+| `silt` | byte-encoded fraction (0--255) | Predicted silt fraction |
+
+The three bands are stored together and must be configured in the order shown. For
+valid pixels, their sum is approximately 255, subject to byte quantization.
+Consumers needing percentages can multiply valid values by `100 / 255`; rslearn
+does not perform that conversion or correct the original quantization.
