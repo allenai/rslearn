@@ -10,9 +10,12 @@ Kingdom. They were produced from 2018 covariates and LUCAS 2009 soil texture
 samples. The dataset is distributed as 122 EPSG:4326 Cloud-Optimized GeoTIFF tiles
 through the [version 2 dataset record](https://doi.org/10.5281/zenodo.21281853).
 
-rslearn reads only the required COG byte ranges during materialization and converts
-the stored byte fractions to percentages. Empty pixels are returned as `NaN`. The
-source is licensed under CC BY 4.0; users should cite the paper and dataset record.
+rslearn reads only the required COG byte ranges during materialization and preserves
+the original byte-encoded texture values (0--255), without percentage conversion or
+renormalization. Values are returned as `float32`, which represents every source
+byte exactly, so empty pixels can be represented as `NaN`. A zero texture value
+with nonzero uncertainty remains a valid zero. The source is licensed under
+CC BY 4.0; users should cite the paper and dataset record.
 
 ### Configuration
 
@@ -54,9 +57,11 @@ exact 3-degree grid.
 
 | Band | Unit | Description |
 |---|---|---|
-| `clay` | % | Predicted clay fraction |
-| `sand` | % | Predicted sand fraction |
-| `silt` | % | Predicted silt fraction |
+| `clay` | byte-encoded fraction (0--255) | Predicted clay fraction |
+| `sand` | byte-encoded fraction (0--255) | Predicted sand fraction |
+| `silt` | byte-encoded fraction (0--255) | Predicted silt fraction |
 
 The three bands are stored together and must be configured in the order shown. For
-valid pixels, their sum is approximately 100%, subject to byte quantization.
+valid pixels, their sum is approximately 255, subject to byte quantization.
+Consumers needing percentages can multiply valid values by `100 / 255`; rslearn
+does not perform that conversion or correct the original quantization.

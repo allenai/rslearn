@@ -2,7 +2,7 @@
 
 The dataset contains 122 Cloud-Optimized GeoTIFF tiles covering the EU-27 and the
 United Kingdom. This source currently exposes the clay, sand, and silt predictions
-from the 0--20 cm soil layer as percentages.
+from the 0--20 cm soil layer as their original byte-encoded fractions.
 
 See https://doi.org/10.1038/s41597-026-08273-1 and
 https://doi.org/10.5281/zenodo.21281853 for details.
@@ -42,12 +42,6 @@ BASE_URL = "https://igeocloud.boku.ac.at/public.php/dav/files/9KQqb8pxPrArTta/Te
 
 TEXTURE_BANDS = ["clay", "sand", "silt"]
 
-# Source pixels are bytes whose three texture values sum to approximately 255.
-# The provider describes the public values as percentages, so convert the byte
-# fractions to the 0--100 range. The corresponding uncertainty bands are only read
-# to identify empty pixels, as documented by the provider.
-PERCENT_SCALE = 100.0 / 255.0
-
 TILE_COUNT = 122
 GRID_INDEX_CELL_SIZE = 3.0
 
@@ -82,8 +76,8 @@ class EuropeanSoilProperties(
                 )
             if band_sets[0].dtype != DType.FLOAT32:
                 raise ValueError(
-                    "EuropeanSoilProperties requires dtype=float32 because values "
-                    "are scaled to percentages and empty pixels are NaN"
+                    "EuropeanSoilProperties requires dtype=float32 because "
+                    "empty pixels are NaN"
                 )
             if context.layer_config.resampling_method != ResamplingMethod.NEAREST:
                 raise ValueError(
@@ -166,7 +160,7 @@ class EuropeanSoilProperties(
     def get_raster_metadata(
         self, layer_name: str, item: Item, bands: list[str]
     ) -> RasterMetadata:
-        """Return metadata for the scaled output bands."""
+        """Return metadata for the unscaled output bands."""
         if bands != TEXTURE_BANDS:
             raise ValueError(f"expected bands {TEXTURE_BANDS}, got {bands}")
         return RasterMetadata(nodata_value=float("nan"))
@@ -181,7 +175,7 @@ class EuropeanSoilProperties(
         bounds: PixelBounds,
         resampling: Resampling = Resampling.nearest,
     ) -> RasterArray:
-        """Read, reproject, mask, and scale the three texture bands."""
+        """Read, reproject, and mask the unscaled texture bands."""
         if bands != TEXTURE_BANDS:
             raise ValueError(f"expected bands {TEXTURE_BANDS}, got {bands}")
 
@@ -214,18 +208,12 @@ class EuropeanSoilProperties(
         ):
             data = vrt.read(indexes=[1, 2, 3, 4, 5, 6])
 
-        values = data[:3] * PERCENT_SCALE
+        # Float32 represents every source byte exactly and supports NaN nodata.
+        values = data[:3]
         # The provider defines an empty pixel as a value/uncertainty pair that
         # is both zero. Nearest-neighbour keeps each pair from the same pixel.
         empty = (data[:3] == 0) & (data[3:] == 0)
         values[empty] = np.nan
-
-        # The model produces compositional fractions summing to one before they are
-        # quantized to bytes. Correct that quantization so valid pixels sum to 100%.
-        valid = np.all(np.isfinite(values), axis=0)
-        totals = values.sum(axis=0)
-        normalizable = valid & (totals > 0)
-        values[:, normalizable] *= 100.0 / totals[normalizable]
 
         return RasterArray(
             chw_array=values,

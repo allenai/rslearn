@@ -53,5 +53,6 @@ def test_read_raster(tmp_path: pathlib.Path) -> None:
     assert array.shape == (3, size, size)
     valid = np.all(np.isfinite(array), axis=0)
     assert valid.any()
-    assert np.all((array[:, valid] >= 0) & (array[:, valid] <= 100))
-    np.testing.assert_allclose(array[:, valid].sum(axis=0), 100, atol=1.5)
+    assert array.dtype == np.float32
+    assert np.all((array[:, valid] >= 0) & (array[:, valid] <= 255))
+    np.testing.assert_array_equal(array[:, valid], np.floor(array[:, valid]))

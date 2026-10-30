@@ -26,7 +26,6 @@ from rslearn.const import WGS84_PROJECTION
 from rslearn.data_sources.data_source import DataSourceContext, Item
 from rslearn.data_sources.european_soil_properties import (
     BASE_URL,
-    PERCENT_SCALE,
     TEXTURE_BANDS,
     TILE_COUNT,
     EuropeanSoilProperties,
@@ -135,7 +134,7 @@ def test_requires_float32_texture_band_set(cache_dir: str) -> None:
 
 
 @pytest.mark.parametrize("resolution", [1, 0.5, 2])
-def test_read_raster_scales_and_masks_empty_pairs(
+def test_read_raster_preserves_source_values_and_masks_empty_pairs(
     tmp_path: pathlib.Path,
     monkeypatch: pytest.MonkeyPatch,
     cache_dir: str,
@@ -163,18 +162,14 @@ def test_read_raster_scales_and_masks_empty_pairs(
     )
     array = raster.get_chw_array()
 
-    expected = (
-        np.array(
-            [
-                [[51, np.nan], [0, 25]],
-                [[101, np.nan], [0, 75]],
-                [[102, np.nan], [255, 155]],
-            ],
-            dtype=np.float32,
-        )
-        * PERCENT_SCALE
+    expected = np.array(
+        [
+            [[51, np.nan], [0, 25]],
+            [[101, np.nan], [0, 75]],
+            [[102, np.nan], [255, 155]],
+        ],
+        dtype=np.float32,
     )
-    expected *= 100 / expected.sum(axis=0)
     if resolution == 2:
         # The coarser pixel selects the bottom-right sample, without averaging
         # the empty top-right pixel or the other valid compositions into it.
@@ -184,7 +179,14 @@ def test_read_raster_scales_and_masks_empty_pairs(
         expected = expected.repeat(repeats, axis=1).repeat(repeats, axis=2)
     assert array.shape == (3, size, size)
     # Resizing must preserve sampled compositions without blending.
-    np.testing.assert_allclose(array, expected, equal_nan=True)
+    assert array.dtype == np.float32
+    # The first valid pixel sums to 254: do not normalize it to 255 or 100.
+    np.testing.assert_array_equal(array, expected)
+    assert np.isnan(
+        data_source.get_raster_metadata(
+            "soil_texture", item, TEXTURE_BANDS
+        ).nodata_value
+    )
     assert np.isnan(raster.metadata.nodata_value)
 
 
