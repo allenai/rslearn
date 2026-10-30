@@ -8,6 +8,7 @@ See https://doi.org/10.1038/s41597-026-08273-1 and
 https://doi.org/10.5281/zenodo.21281853 for details.
 """
 
+import json
 from typing import cast
 
 import affine
@@ -17,6 +18,7 @@ import rasterio.vrt
 import shapely
 from rasterio.enums import Resampling
 from typing_extensions import override
+from upath import UPath
 
 import rslearn.data_sources.utils
 from rslearn.config import DType, QueryConfig
@@ -30,6 +32,7 @@ from rslearn.data_sources.direct_materialize_data_source import (
     DirectMaterializeDataSource,
 )
 from rslearn.data_sources.utils import MatchedItemGroup
+from rslearn.utils.fsspec import join_upath, open_atomic
 from rslearn.utils.geometry import PixelBounds, Projection, STGeometry
 from rslearn.utils.grid_index import GridIndex
 from rslearn.utils.raster_array import RasterArray, RasterMetadata
@@ -44,45 +47,7 @@ TEXTURE_BANDS = ["clay", "sand", "silt"]
 # to identify empty pixels, as documented by the provider.
 PERCENT_SCALE = 100.0 / 255.0
 
-# The published tiles form a regular 3-degree grid, but only cells intersecting the
-# dataset coverage were exported. These rows are ordered exactly like Tile_1 through
-# Tile_122. Values refer to indices in X_ORIGINS.
-X_ORIGINS = (
-    -10.4782190,
-    -7.4782052,
-    -4.4781915,
-    -1.4782676,
-    1.5217461,
-    4.5217598,
-    7.5217735,
-    10.5217873,
-    13.5218010,
-    16.5218147,
-    19.5217386,
-    22.5217523,
-    25.5217660,
-    28.5217798,
-    31.5217935,
-)
-ROW_MIN_Y_AND_X_INDICES = (
-    (68.1270633, (9, 10, 11, 12, 13)),
-    (65.1270496, (8, 9, 10, 11, 12, 13)),
-    (62.1270359, (7, 8, 9, 10, 11, 12, 13, 14)),
-    (59.1270222, (2, 3, 7, 8, 9, 10, 11, 12, 13)),
-    (56.1270983, (1, 2, 6, 7, 8, 9, 10, 11, 12)),
-    (53.1270846, (0, 1, 2, 3, 5, 6, 7, 8, 9, 10, 11, 12)),
-    (50.1270708, tuple(range(0, 12))),
-    (47.1270571, tuple(range(1, 13))),
-    (44.1270434, tuple(range(2, 14))),
-    (41.1270297, tuple(range(0, 14))),
-    (38.1270159, (0, 1, 2, 3, 4, 6, 7, 8, 9, 10, 11, 12)),
-    (35.1270920, (0, 1, 2, 3, 7, 8, 10, 11, 12)),
-    (32.1270783, (11, 12)),
-)
-
-# Actual tile dimensions are just over three degrees because the rasters contain a
-# whole number of ~10 m pixels. This margin matches their published bounding boxes.
-TILE_SIZE_DEGREES = 3.0002
+TILE_COUNT = 122
 GRID_INDEX_CELL_SIZE = 3.0
 
 
@@ -91,13 +56,21 @@ class EuropeanSoilProperties(
 ):
     """Read the BOKU high-resolution European clay, sand, and silt maps."""
 
-    def __init__(self, context: DataSourceContext = DataSourceContext()) -> None:
+    def __init__(
+        self,
+        cache_dir: str,
+        context: DataSourceContext | None = None,
+    ) -> None:
         """Create a European soil texture data source.
 
         Args:
+            cache_dir: directory for the tile metadata cache, resolved relative to
+                the dataset path when available. Delete the cache to refresh it.
             context: data source context supplied by rslearn.
         """
         super().__init__(asset_bands={"textures": TEXTURE_BANDS})
+        if context is None:
+            context = DataSourceContext()
 
         if context.layer_config is not None:
             band_sets = context.layer_config.band_sets
@@ -114,25 +87,35 @@ class EuropeanSoilProperties(
 
         self._grid_index = GridIndex(GRID_INDEX_CELL_SIZE)
         self._items_by_name: dict[str, Item] = {}
-        tile_number = 1
-        for min_y, x_indices in ROW_MIN_Y_AND_X_INDICES:
-            for x_index in x_indices:
-                min_x = X_ORIGINS[x_index]
-                shp = shapely.box(
-                    min_x,
-                    min_y,
-                    min_x + TILE_SIZE_DEGREES,
-                    min_y + TILE_SIZE_DEGREES,
-                )
-                item = Item(
-                    name=f"Tile_{tile_number}",
-                    geometry=STGeometry(WGS84_PROJECTION, shp, None),
-                )
-                self._grid_index.insert(shp.bounds, item)
-                self._items_by_name[item.name] = item
-                tile_number += 1
+        if context.ds_path is not None:
+            self.cache_dir = join_upath(context.ds_path, cache_dir)
+        else:
+            self.cache_dir = UPath(cache_dir)
+        self.cache_dir.mkdir(parents=True, exist_ok=True)
+        for item in self._load_items():
+            self._grid_index.insert(item.geometry.shp.bounds, item)
+            self._items_by_name[item.name] = item
 
-        assert tile_number == 123
+    def _load_items(self) -> list[Item]:
+        """Read cached tile metadata, or discover bounds from the COG headers."""
+        cache_path = self.cache_dir / "tile_index.json"
+        if cache_path.exists():
+            with cache_path.open() as f:
+                return [Item.deserialize(item) for item in json.load(f)]
+
+        items = []
+        for tile_number in range(1, TILE_COUNT + 1):
+            name = f"Tile_{tile_number}"
+            with rasterio.open(f"{BASE_URL}/{name}.tif") as src:
+                if src.crs != WGS84_PROJECTION.crs:
+                    raise ValueError(f"expected EPSG:4326 for {name}, got {src.crs}")
+                geometry = STGeometry(WGS84_PROJECTION, shapely.box(*src.bounds), None)
+            items.append(Item(name=name, geometry=geometry))
+
+        # Publish only a complete index so failed discovery is retried next time.
+        with open_atomic(cache_path, "w") as f:
+            json.dump([item.serialize() for item in items], f)
+        return items
 
     @override
     def get_items(

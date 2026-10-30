@@ -30,11 +30,19 @@ Data is read directly from the public COGs, so set `"ingest": false`:
     ],
     "data_source": {
       "name": "rslearn.data_sources.european_soil_properties.EuropeanSoilProperties",
-      "ingest": false
+      "ingest": false,
+      "cache_dir": "cache/european_soil_properties"
     }
   }
 }
 ```
+
+On first initialization, rslearn reads the headers of all 122 COGs to discover
+their exact bounds and saves `tile_index.json` in `cache_dir`. Subsequent
+initializations reuse that index without metadata requests. Relative cache paths
+are resolved against the dataset directory. Delete the index to refresh it. The
+tiles are approximately three degrees across, but their bounds do not form an
+exact 3-degree grid.
 
 ### Available Bands
 

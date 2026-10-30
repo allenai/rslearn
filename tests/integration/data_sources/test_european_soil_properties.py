@@ -1,6 +1,8 @@
 """Integration tests for the BOKU European soil texture data source."""
 
+import json
 import pathlib
+from unittest.mock import MagicMock, patch
 
 import numpy as np
 import pytest
@@ -9,6 +11,7 @@ import shapely
 from affine import Affine
 from rasterio import CRS
 from rasterio.enums import Resampling
+from upath import UPath
 
 from rslearn.config import (
     BandSetConfig,
@@ -21,11 +24,29 @@ from rslearn.config import (
 from rslearn.const import WGS84_PROJECTION
 from rslearn.data_sources.data_source import DataSourceContext, Item
 from rslearn.data_sources.european_soil_properties import (
+    BASE_URL,
     PERCENT_SCALE,
     TEXTURE_BANDS,
+    TILE_COUNT,
     EuropeanSoilProperties,
 )
 from rslearn.utils.geometry import Projection, STGeometry
+
+
+@pytest.fixture
+def cache_dir(tmp_path: pathlib.Path) -> str:
+    cache = tmp_path / "cache"
+    cache.mkdir()
+    item = Item(
+        "Tile_69",
+        STGeometry(
+            WGS84_PROJECTION,
+            shapely.box(13.5218010, 47.1270571, 16.5219513, 50.1272074),
+            None,
+        ),
+    )
+    (cache / "tile_index.json").write_text(json.dumps([item.serialize()]))
+    return str(cache)
 
 
 def _vienna_geometry() -> STGeometry:
@@ -69,8 +90,8 @@ def _write_texture_geotiff(path: pathlib.Path) -> pathlib.Path:
     return path
 
 
-def test_get_items_and_lookup() -> None:
-    data_source = EuropeanSoilProperties()
+def test_get_items_and_lookup(cache_dir: str) -> None:
+    data_source = EuropeanSoilProperties(cache_dir=cache_dir)
     groups = data_source.get_items(
         [_vienna_geometry()], QueryConfig(space_mode=SpaceMode.INTERSECTS)
     )[0]
@@ -82,8 +103,8 @@ def test_get_items_and_lookup() -> None:
         data_source.get_item_by_name("Tile_123")
 
 
-def test_get_asset_url() -> None:
-    data_source = EuropeanSoilProperties()
+def test_get_asset_url(cache_dir: str) -> None:
+    data_source = EuropeanSoilProperties(cache_dir=cache_dir)
     item = data_source.get_item_by_name("Tile_69")
     assert data_source.get_asset_url(item, "textures").endswith(
         "/9KQqb8pxPrArTta/Textures/Tile_69.tif"
@@ -92,27 +113,31 @@ def test_get_asset_url() -> None:
         data_source.get_asset_url(item, "unknown")
 
 
-def test_requires_float32_texture_band_set() -> None:
+def test_requires_float32_texture_band_set(cache_dir: str) -> None:
     wrong_dtype = LayerConfig(
         type=LayerType.RASTER,
         band_sets=[BandSetConfig(dtype=DType.UINT8, bands=TEXTURE_BANDS)],
     )
     with pytest.raises(ValueError, match="dtype=float32"):
-        EuropeanSoilProperties(context=DataSourceContext(layer_config=wrong_dtype))
+        EuropeanSoilProperties(
+            cache_dir=cache_dir, context=DataSourceContext(layer_config=wrong_dtype)
+        )
 
     wrong_bands = LayerConfig(
         type=LayerType.RASTER,
         band_sets=[BandSetConfig(dtype=DType.FLOAT32, bands=["clay"])],
     )
     with pytest.raises(ValueError, match="requires one band set"):
-        EuropeanSoilProperties(context=DataSourceContext(layer_config=wrong_bands))
+        EuropeanSoilProperties(
+            cache_dir=cache_dir, context=DataSourceContext(layer_config=wrong_bands)
+        )
 
 
 def test_read_raster_scales_and_masks_empty_pairs(
-    tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch
+    tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch, cache_dir: str
 ) -> None:
     geotiff_path = _write_texture_geotiff(tmp_path / "textures.tif")
-    data_source = EuropeanSoilProperties()
+    data_source = EuropeanSoilProperties(cache_dir=cache_dir)
     item = Item(
         "test",
         STGeometry(WGS84_PROJECTION, shapely.box(0, 0, 2, 2), None),
@@ -144,8 +169,78 @@ def test_read_raster_scales_and_masks_empty_pairs(
     assert np.isnan(raster.metadata.nodata_value)
 
 
-def test_rejects_partial_band_request() -> None:
-    data_source = EuropeanSoilProperties()
+def test_rejects_partial_band_request(cache_dir: str) -> None:
+    data_source = EuropeanSoilProperties(cache_dir=cache_dir)
     item = data_source.get_item_by_name("Tile_69")
     with pytest.raises(ValueError, match="expected bands"):
         data_source.get_raster_metadata("soil_texture", item, ["clay"])
+
+
+def test_discovers_exact_bounds_and_reuses_cache(tmp_path: pathlib.Path) -> None:
+    cache = tmp_path / "cache"
+    bounds = (-10.478219, 32.1270783, -7.4780687, 35.1272286)
+    src = MagicMock()
+    src.__enter__.return_value = src
+    src.crs = CRS.from_epsg(4326)
+    src.bounds = bounds
+    with patch("rasterio.open", return_value=src) as open_cog:
+        source = EuropeanSoilProperties(
+            cache_dir="cache", context=DataSourceContext(ds_path=UPath(tmp_path))
+        )
+        assert open_cog.call_count == TILE_COUNT
+        assert [call.args[0] for call in open_cog.call_args_list] == [
+            f"{BASE_URL}/Tile_{i}.tif" for i in range(1, TILE_COUNT + 1)
+        ]
+        src.read.assert_not_called()
+    assert source.get_item_by_name("Tile_1").geometry.shp.bounds == bounds
+    # A query in the non-ideal edge strip must still find the tile.
+    edge = STGeometry(WGS84_PROJECTION, shapely.box(-7.4781, 33, -7.47808, 33.01), None)
+    groups = source.get_items([edge], QueryConfig(space_mode=SpaceMode.INTERSECTS))[0]
+    assert groups
+    assert groups[0].items[0].geometry.shp.bounds == bounds
+    with patch(
+        "rasterio.open", side_effect=AssertionError("unexpected network request")
+    ):
+        cached = EuropeanSoilProperties(cache_dir=str(cache))
+    for i in range(1, TILE_COUNT + 1):
+        name = f"Tile_{i}"
+        assert (
+            cached.get_item_by_name(name).serialize()
+            == source.get_item_by_name(name).serialize()
+        )
+
+
+def test_failed_discovery_does_not_cache_partial_index(tmp_path: pathlib.Path) -> None:
+    src = MagicMock()
+    src.__enter__.return_value = src
+    src.crs = CRS.from_epsg(4326)
+    src.bounds = (0, 0, 3.0001, 3.0001)
+    with (
+        patch(
+            "rasterio.open",
+            side_effect=[src, rasterio.errors.RasterioIOError("unavailable")],
+        ),
+        pytest.raises(rasterio.errors.RasterioIOError, match="unavailable"),
+    ):
+        EuropeanSoilProperties(cache_dir=str(tmp_path))
+    assert not (tmp_path / "tile_index.json").exists()
+    with patch("rasterio.open", return_value=src) as open_cog:
+        EuropeanSoilProperties(cache_dir=str(tmp_path))
+        assert open_cog.call_count == TILE_COUNT
+
+
+def test_instantiates_from_layer_config(cache_dir: str) -> None:
+    config = LayerConfig.model_validate(
+        {
+            "type": "raster",
+            "band_sets": [{"dtype": "float32", "bands": TEXTURE_BANDS}],
+            "data_source": {
+                "name": "rslearn.data_sources.european_soil_properties.EuropeanSoilProperties",
+                "ingest": False,
+                "cache_dir": cache_dir,
+            },
+        }
+    )
+    source = config.instantiate_data_source()
+    assert isinstance(source, EuropeanSoilProperties)
+    assert source.get_item_by_name("Tile_69").name == "Tile_69"

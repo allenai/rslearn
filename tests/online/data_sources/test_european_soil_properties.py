@@ -1,5 +1,7 @@
 """Online test for the BOKU European soil texture data source."""
 
+import pathlib
+
 import numpy as np
 import shapely
 from rasterio import CRS
@@ -13,7 +15,7 @@ from rslearn.data_sources.european_soil_properties import (
 from rslearn.utils.geometry import Projection, STGeometry
 
 
-def test_read_raster() -> None:
+def test_read_raster(tmp_path: pathlib.Path) -> None:
     """Read a small agricultural area east of Vienna from the public COG."""
     projection = Projection(CRS.from_epsg(32633), 10, -10)
     point = STGeometry(WGS84_PROJECTION, shapely.Point(16.7, 48.2), None)
@@ -30,7 +32,7 @@ def test_read_raster() -> None:
         None,
     )
 
-    data_source = EuropeanSoilProperties()
+    data_source = EuropeanSoilProperties(cache_dir=str(tmp_path / "cache"))
     groups = data_source.get_items(
         [geometry], QueryConfig(space_mode=SpaceMode.INTERSECTS)
     )[0]
