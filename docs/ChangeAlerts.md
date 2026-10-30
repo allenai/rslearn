@@ -16,102 +16,171 @@ These components are not intended for comparing conditions between two distant t
 periods (e.g. one year versus another). For that, a model that inputs a regular time
 series spanning both periods is sufficient.
 
+## Terminology
+
+These terms are used throughout this page. The examples use weekly frequent images and
+quarterly infrequent images, as in the [example configs](#example-configs).
+
+- **Change date** (`c`): the date when a change first becomes observable in the
+  imagery. Labels are relative to it.
+- **Category raster**: the per-pixel change category label, including an invalid
+  category (e.g. 0) and a "no change" category (e.g. 1).
+- **Change day raster**: the per-pixel change date label, as the number of days since
+  1970-01-01 (UTC), with 65535 at pixels without a change (e.g. negatives).
+- **Frequent period** (`p`, e.g. 7 days): the duration of each frequent image.
+- **Frequent images**: mosaics with one per frequent period, materialized in the
+  `frequent` layer. Periods without any images are skipped.
+- **Number of frequent images** (`num_frequent`, `N`, e.g. 4): the maximum number of
+  frequent images in the time series.
+- **Infrequent period** (`q`, e.g. 90 days): the duration of each infrequent image.
+- **Infrequent images**: mosaics with one per infrequent period, materialized in the
+  `infrequent` layer, providing historical context before the frequent images.
+- **Number of infrequent images** (`num_infrequent`, e.g. 8): the maximum number of
+  infrequent images in the time series.
+- **Infrequent history duration** (`I`, e.g. 720 days): how far back the infrequent
+  layer extends before the window start. It must be a multiple of the infrequent
+  period, and is typically `num_infrequent` infrequent periods.
+- **Detection range** (`D`, e.g. 91 days): the longest time from the change date to
+  the end of the time series at which the model should still detect the change. It
+  must be a multiple of the frequent period, so that a frequent period starts exactly
+  at the change date.
+- **Training window**: a window used for training, with time range
+  `(c - (N - 1) * p, c + D)`, e.g. `(c - 21 days, c + 91 days)`. For windows without a
+  change (negatives), any date can be used as `c`.
+- **Time to alert on** (`t`): the time at which the model is applied, e.g. now.
+- **Prediction window**: a window used for prediction, with time range
+  `(t - N * p, t)`, e.g. `(t - 28 days, t)`, i.e. the latest `N` frequent periods.
+- **Window start** and **window end**: the start and end of the window time range.
+- **Pick**: the `N` consecutive frequent images (or all of them if there are fewer)
+  chosen by `ChangeTimeSeriesSampler` for one example. Since the training window
+  starts only `N - 1` frequent periods before the change date, every pick ends between
+  one frequent period and the detection range after the change date.
+- **Reduced pick**: during training, the sampler sometimes keeps only the latest
+  `n < N` images of the pick, to simulate prediction windows where some frequent
+  periods have no images.
+- **Stand-in image**: the frequent image just before the pick, used in place of the
+  most recent infrequent image when the gap between the infrequent images and the pick
+  is at least half an infrequent period.
+- **Time series**: the model input built by the sampler: the infrequent images (and
+  stand-in image, if any) followed by the kept frequent images of the pick.
+- **Last alert date** and **margin**: see [Alerting](#alerting).
+
 ## Example Configs
 
 These example configs train and apply a change alert model on weekly Sentinel-2
 mosaics preceded by quarterly mosaics, using OlmoEarth:
 
-- [config_train.json](ChangeAlerts/config_train.json): the training dataset config,
-  with four slots (see [Dataset](#dataset)) and the label layers.
-- [config_predict.json](ChangeAlerts/config_predict.json): the prediction dataset
-  config, with a single slot that ends at the window time (see
-  [Prediction](#prediction)).
-- [config.yaml](ChangeAlerts/config.yaml): the model config, which is shared by
+- [config.json](ChangeAlerts/config.json): the dataset config, with the frequent and
+  infrequent layers (see [Dataset](#dataset)), the label layers, and the output
+  layers. It is used for both the training and the prediction dataset.
+- [config.yaml](ChangeAlerts/config.yaml): the model config, which is also shared by
   training and prediction.
 
-The two dataset configs go in separate datasets, and the model config reads the
-dataset path from `DATASET_PATH`:
+The training and prediction windows go in separate datasets (or separate groups of
+one dataset), and the model config reads the dataset path from `DATASET_PATH`:
 
 ```
-cp config_train.json dataset_train/config.json
-cp config_predict.json dataset_predict/config.json
+cp config.json dataset_train/config.json
+cp config.json dataset_predict/config.json
 # After creating and materializing windows in each dataset:
 DATASET_PATH=./dataset_train rslearn model fit --config config.yaml
 DATASET_PATH=./dataset_predict rslearn model predict --config config.yaml
 ```
 
-Both dataset configs include the output layers, since `RslearnWriter` loads the output
+The dataset config includes the output layers, since `RslearnWriter` loads the output
 layer config when it is set up, including during `model fit`.
 
 ## Dataset
 
-Each window is a point in time at the date when the change first becomes observable,
-i.e. its time range is `(change date, change date)`. Labels consist of a category
-raster and a change day raster, which stores the number of days since 1970-01-01 (UTC)
-at which the change first becomes observable at each pixel, with 65535 at pixels
-without a change (e.g. negatives), matching `PerPixelTimestepTask`. The change day
-raster can be stored as `uint16`.
+Labels consist of a category raster and a change day raster (see
+[Terminology](#terminology)), matching `PerPixelTimestepTask`. The change day raster
+can be stored as `uint16`.
 
-During training, the change should appear at varying positions within the input time
-series. To support this, the dataset contains several "slots", each a time series that
-ends at a fixed offset after the change date. `slot_end_offsets` computes evenly
-spaced offsets, from one period after the change (so that the change appears only in
-the latest image) to the end of the change detection range:
+`ChangeAlertTiming` holds the frequent period, the number of frequent images, and the
+detection range, and computes the window time ranges:
 
 ```python
-from datetime import timedelta
-from rslearn.change_alerts.slots import slot_end_offsets
+from datetime import UTC, datetime, timedelta
+from rslearn.change_alerts.layers import ChangeAlertTiming
 
-# [7, 35, 62, 90] days.
-offsets = slot_end_offsets(4, detection_range=timedelta(days=90), period=timedelta(days=7))
+timing = ChangeAlertTiming(
+    frequent_period=timedelta(days=7),
+    num_frequent=4,
+    detection_range=timedelta(days=91),
+)
+# Training window time range: (change date - 21 days, change date + 91 days).
+train_time_range = timing.train_time_range(datetime(2024, 5, 10, tzinfo=UTC))
+# Prediction window time range: (now - 28 days, now).
+predict_time_range = timing.predict_time_range(datetime.now(UTC))
 ```
 
-`make_slot_layer_configs` creates a frequent layer for each slot, ending at the slot
-end, and optionally one infrequent layer shared by all slots. The infrequent layer ends
-where the latest slot's frequent layer starts and extends back far enough to provide
-`infrequent_duration` of history for every slot; the sampler only uses the infrequent
-images that end before the selected frequent images.
+During training, the change should appear at varying positions within the time
+series. Since the training window spans `N + D / p - 1` frequent periods, the sampler
+can pick any `N` consecutive frequent images within it:
 
-Each frequent layer holds the latest `frequent_max_matches` periods within
-`frequent_duration` that have images, so that it falls back to older periods when the
-most recent ones have no images. `frequent_max_matches` is the number of frequent images
-that the model uses. Frequent layers also get `min_matches=1`, so slots without any
-frequent images are reported as rejected during prepare.
+- The earliest pick covers `(c - (N - 1) * p, c + p)`, so the change appears in the
+  latest image.
+- The latest pick ends at the window end, `c + D`, so the change is the detection
+  range before the end of the time series.
+- In between, the change appears at every position, one frequent period apart.
+
+`make_layer_configs` creates the two layers used by both training and prediction
+windows:
+
+- The `frequent` layer covers the window time range, with one mosaic per frequent
+  period. It holds up to `N + D / p - 1` frequent images (16 in the example), so
+  prediction windows, which only span `N` frequent periods, have at most `N`. It also
+  gets `min_matches=1`, so windows without any frequent images are reported as
+  rejected during prepare.
+- The optional `infrequent` layer ends at the window start and extends back by the
+  infrequent history duration, with one mosaic per infrequent period.
 
 ```python
-from rslearn.change_alerts.slots import make_slot_layer_configs
+from rslearn.change_alerts.layers import make_layer_configs
 
-layers = make_slot_layer_configs(
-    end_offsets=offsets,
+layers = make_layer_configs(
+    timing,
     data_source={"class_path": "rslearn.data_sources.planetary_computer.Sentinel2", "ingest": False},
     band_sets=[{"bands": ["B02", "B03", "B04", "B08"], "dtype": "uint16"}],
-    frequent_period=timedelta(days=7),
-    frequent_duration=timedelta(days=63),
-    frequent_max_matches=4,
     infrequent_period=timedelta(days=90),
-    infrequent_duration=timedelta(days=900),
+    infrequent_duration=timedelta(days=720),
 )
-# layers is a dict from layer name ("frequent_0", ..., "frequent_3", "infrequent")
-# to layer config dict, to add to the dataset config.json.
+# layers is a dict from layer name ("frequent", "infrequent") to layer config dict, to
+# add to the dataset config.json.
 ```
 
 ## ChangeTimeSeriesSampler
 
-`ChangeTimeSeriesSampler` is a transform that picks one frequent input per example
-from `frequent_keys` and builds the time series. It picks the frequent input with the
-most images, randomly among ties, or a fixed one via `frequent_index` for evaluation
-and prediction. Then:
+`ChangeTimeSeriesSampler` is a transform that builds the time series for each example
+from the frequent input (`frequent_key`) and the infrequent input (`infrequent_key`):
 
-1. Take the images of the selected frequent input.
-2. Take the latest `num_infrequent` infrequent images that end before the first
-   selected frequent image.
-3. Concatenate them chronologically into `input_dict[output_key]`.
+1. Make a pick of `num_frequent` consecutive frequent images. With `select: random`
+   (the default, for training and evaluation), the pick starts at a random frequent
+   image. With `select: latest` (for prediction), it is the latest frequent images.
+2. With `select: random`, keep all of the pick with probability
+   `full_frequent_probability` (default 0.5). Otherwise, make a reduced pick that
+   keeps only the latest `n` images, with `n` uniform between 1 and
+   `num_frequent - 1`.
+3. Take the latest `num_infrequent` infrequent images that end at or before the start
+   of the pick. If the gap between the last of them and the pick start is at least
+   half of an infrequent period, the frequent image just before the pick is added as a
+   stand-in image, replacing the oldest infrequent image. In a training window, this
+   applies to the later picks; in a prediction window, the gap is less than `N`
+   frequent periods (e.g. 28 days), so it typically does not apply.
+4. Concatenate the infrequent images, stand-in image (if any), and kept frequent
+   images chronologically into `input_dict[output_key]`.
+
+The images dropped in a reduced pick are treated as missing: the infrequent images and
+stand-in image are still chosen relative to the start of the original pick. So the
+reduced pick looks like a prediction window where the earlier frequent periods have no
+images.
 
 The timestep at which the change appears is predicted with `PerPixelTimestepTask`, using
 the change day raster as its target, and `PerPixelTimestepHead` with `mode: AFTER`, which
 maps each change day to the earliest image whose midpoint is on or after it. Pixels
 without a change day (e.g. negatives) are ignored by the timestep task, so they only
-train the category.
+train the category. With a reduced pick, a change in one of the dropped images is
+mapped to the first kept frequent image.
 
 If change dates vary within a window, set `category_target` and `change_day_target` (the
 `PerPixelTimestepTask` target) so that the sampler marks pixels whose change is outside
@@ -119,34 +188,22 @@ the time series (e.g. after the latest image) invalid for both tasks, since the 
 cannot be observed in the input. This is not needed when every pixel in a window shares
 the window's change date.
 
-Each frequent and infrequent input should be loaded with `load_all_layers` and
-`load_all_item_groups`.
-
-Only `freq_0` is required, so windows without any images in that slot are skipped. The
-other frequent inputs are not required: if a slot has no images, its input is missing
-and counts as having zero images, so another slot is picked.
+The frequent and infrequent inputs should be loaded with `load_all_layers` and
+`load_all_item_groups`. The frequent input is required, so windows without any
+frequent images are skipped.
 
 ```yaml
 data:
   class_path: rslearn.train.data_module.RslearnDataModule
   init_args:
     inputs:
-      freq_0:
+      freq:
         data_type: raster
-        layers: [frequent_0]
+        layers: [frequent]
         bands: [B02, B03, B04, B08]
         passthrough: true
         load_all_layers: true
         load_all_item_groups: true
-      freq_1:
-        data_type: raster
-        layers: [frequent_1]
-        bands: [B02, B03, B04, B08]
-        passthrough: true
-        load_all_layers: true
-        load_all_item_groups: true
-        required: false
-      # ... freq_2, freq_3 like freq_1.
       infreq:
         data_type: raster
         layers: [infrequent]
@@ -183,12 +240,14 @@ data:
           timestep:
             class_path: rslearn.train.tasks.per_pixel_timestep.PerPixelTimestepTask
             init_args:
+              # num_infrequent + num_frequent.
               num_classes: 12
     default_config:
       transforms:
         - class_path: rslearn.change_alerts.sampler.ChangeTimeSeriesSampler
           init_args:
-            frequent_keys: [freq_0, freq_1, freq_2, freq_3]
+            frequent_key: freq
+            num_frequent: 4
             infrequent_key: infreq
             num_infrequent: 8
             output_key: sentinel2_l2a
@@ -199,25 +258,20 @@ data:
 
 ## Prediction
 
-At prediction time, each window is a point in time at the time to alert on (e.g. now),
-i.e. its time range is `(t, t)`, and the time series looks back from there. So the
-prediction dataset only needs one slot, which ends at the window time. Create it with
-the same arguments as the training layers, but with a single end offset of zero:
+At prediction time, each window is a prediction window with time range
+`(t - N * p, t)` (from `ChangeAlertTiming.predict_time_range`), so the time series
+looks back from the time to alert on. The prediction dataset uses the same dataset
+config as the training dataset, and the same model config, with these differences in
+`predict_config`:
 
-```python
-layers = make_slot_layer_configs(
-    end_offsets=[timedelta(0)],
-    # ... the same data_source, band_sets, and frequent and infrequent options as for
-    # training.
-)
-```
+- Override `transforms` with the sampler using `select: latest`, so that it uses the
+  latest frequent images without reducing them. The split transforms replace
+  `default_config.transforms`, so the other transforms must be repeated.
+- Set `skip_targets: true` so that the label inputs are skipped.
 
-This produces layers named `frequent_0` and `infrequent`, like the training dataset,
-so the same model config can be used for training and prediction:
-
-- The `freq_1` to `freq_3` inputs are not required, so they are skipped since the
-  prediction windows do not have those layers, and the sampler always picks `freq_0`.
-- Set `skip_targets: true` in `predict_config` so that the label inputs are skipped.
+If some frequent periods in a prediction window have no images, the time series has
+fewer frequent images, as in a reduced pick during training. Prediction windows
+without any frequent images are rejected during prepare, so they get no outputs.
 
 The category and change day outputs can be written to separate output layers with two
 `RslearnWriter` callbacks, using `selector: [category]` and `selector: [timestep]`. The
@@ -227,18 +281,18 @@ change day output layer should use the `uint16` dtype with `nodata_value: 65535`
 ## Alerting
 
 When the model is applied repeatedly, e.g. weekly, each change stays in the input time
-series and is predicted again on every run until it is older than the detection range.
+series and is predicted again on every run while it is within the detection range.
 To generate vector alerts only for new changes, maintain a raster that stores, at each
-pixel, the date of the last alert there (as days since 1970-01-01, with 0 where there
+pixel, the **last alert date** there (as days since 1970-01-01, with 0 where there
 has not been an alert yet). This raster should be on the same grid as the predictions,
 so use prediction windows with the same names and bounds on every run, and only update
-their time range to the current time.
+their time range to the current prediction window time range.
 
 On each run:
 
 1. A pixel is eligible for a new alert if its predicted category is a change category
    (i.e. not invalid or "no change"), and its predicted change date is more than a
-   margin after its last alert date. Since the change date predictions can jitter
+   **margin** after its last alert date. Since the change date predictions can jitter
    between runs, we recommend a margin of 90 days. This also means that a pixel alerts
    at most once within the margin, so a second change at the same pixel within the
    margin is not alerted.

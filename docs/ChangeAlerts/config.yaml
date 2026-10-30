@@ -1,6 +1,6 @@
 # Model config for change alerts, used for both training and prediction. Set
-# DATASET_PATH to the training dataset (config_train.json) for `model fit`, and to the
-# prediction dataset (config_predict.json) for `model predict`.
+# DATASET_PATH to the training dataset for `model fit`, and to the prediction dataset
+# for `model predict`. Both datasets use config.json.
 model:
   class_path: rslearn.train.lightning_module.RslearnLightningModule
   init_args:
@@ -64,43 +64,15 @@ data:
   init_args:
     path: ${DATASET_PATH}
     inputs:
-      # One input per slot. Only freq_0 is required: the prediction dataset only has
-      # the frequent_0 layer, so freq_1 to freq_3 are skipped there.
-      freq_0:
+      # Windows without any frequent images are skipped.
+      freq:
         data_type: raster
-        layers: [frequent_0]
+        layers: [frequent]
         bands: [B02, B03, B04, B08, B05, B06, B07, B8A, B11, B12, B01, B09]
         passthrough: true
         dtype: FLOAT32
         load_all_layers: true
         load_all_item_groups: true
-      freq_1:
-        data_type: raster
-        layers: [frequent_1]
-        bands: [B02, B03, B04, B08, B05, B06, B07, B8A, B11, B12, B01, B09]
-        passthrough: true
-        dtype: FLOAT32
-        load_all_layers: true
-        load_all_item_groups: true
-        required: false
-      freq_2:
-        data_type: raster
-        layers: [frequent_2]
-        bands: [B02, B03, B04, B08, B05, B06, B07, B8A, B11, B12, B01, B09]
-        passthrough: true
-        dtype: FLOAT32
-        load_all_layers: true
-        load_all_item_groups: true
-        required: false
-      freq_3:
-        data_type: raster
-        layers: [frequent_3]
-        bands: [B02, B03, B04, B08, B05, B06, B07, B8A, B11, B12, B01, B09]
-        passthrough: true
-        dtype: FLOAT32
-        load_all_layers: true
-        load_all_item_groups: true
-        required: false
       infreq:
         data_type: raster
         layers: [infrequent]
@@ -146,7 +118,7 @@ data:
                   class_path: rslearn.change_alerts.metrics.ChangeAUROC
                   init_args:
                     none_class: 1
-          # 8 infrequent images plus 4 frequent images.
+          # At most 8 infrequent images plus 4 frequent images.
           timestep:
             class_path: rslearn.train.tasks.per_pixel_timestep.PerPixelTimestepTask
             init_args:
@@ -161,11 +133,12 @@ data:
     num_workers: 16
     default_config:
       transforms:
-        # Build the sentinel2_l2a time series from one slot plus the infrequent
-        # history. During prediction, only freq_0 is present, so it is always used.
+        # Build the sentinel2_l2a time series from a random pick of 4 consecutive
+        # frequent images (sometimes reduced to fewer) plus the infrequent history.
         - class_path: rslearn.change_alerts.sampler.ChangeTimeSeriesSampler
           init_args:
-            frequent_keys: [freq_0, freq_1, freq_2, freq_3]
+            frequent_key: freq
+            num_frequent: 4
             infrequent_key: infreq
             num_infrequent: 8
             output_key: sentinel2_l2a
@@ -192,6 +165,21 @@ data:
       crop_size: 64
       overlap_pixels: 8
       skip_targets: true
+      # The split transforms replace default_config.transforms, so the whole list is
+      # repeated, with the sampler using the latest frequent images.
+      transforms:
+        - class_path: rslearn.change_alerts.sampler.ChangeTimeSeriesSampler
+          init_args:
+            frequent_key: freq
+            num_frequent: 4
+            infrequent_key: infreq
+            num_infrequent: 8
+            output_key: sentinel2_l2a
+            select: latest
+        - class_path: rslearn.models.olmoearth_pretrain.norm.OlmoEarthNormalize
+          init_args:
+            band_names:
+              sentinel2_l2a: [B02, B03, B04, B08, B05, B06, B07, B8A, B11, B12, B01, B09]
 trainer:
   max_epochs: 100
   callbacks:

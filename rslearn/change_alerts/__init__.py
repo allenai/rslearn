@@ -7,11 +7,11 @@ mosaics) that provide historical context. It is not intended for comparing condi
 between two distant time periods (e.g. one year versus another), where a model that
 simply inputs a regular time series spanning both periods is sufficient.
 
-During training, each example is labeled with the date at which a change first becomes
-observable. Several frequent time series ending at different offsets after that date
-are materialized as separate dataset layers, sharing one infrequent layer (see
-slots.py), and ChangeTimeSeriesSampler (see sampler.py) picks one of the frequent time
-series per example and prepends infrequent history. The model predicts the change
-category per pixel, and the timestep at which the change appears with
-PerPixelTimestepTask.
+During training, each window spans from shortly before the date at which a change
+first becomes observable to the detection range after it (see layers.py), and
+ChangeTimeSeriesSampler (see sampler.py) picks consecutive frequent images within it
+and prepends infrequent history, so the change appears at varying positions. The same
+dataset config is used for prediction, with windows covering the latest frequent
+periods. The model predicts the change category per pixel, and the timestep at which
+the change appears with PerPixelTimestepTask.
 """

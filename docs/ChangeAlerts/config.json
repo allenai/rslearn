@@ -1,6 +1,6 @@
 {
   "layers": {
-    "frequent_0": {
+    "frequent": {
       "band_sets": [
         {
           "bands": [
@@ -22,20 +22,18 @@
       ],
       "data_source": {
         "class_path": "rslearn.data_sources.planetary_computer.Sentinel2",
-        "duration": "63d",
         "ingest": false,
         "init_args": {
           "harmonize": true,
           "sort_by": "eo:cloud_cover"
         },
         "query_config": {
-          "max_matches": 4,
+          "max_matches": 16,
           "min_matches": 1,
           "per_period_mosaic_reverse_time_order": false,
           "period_duration": "7d",
           "space_mode": "MOSAIC"
-        },
-        "time_offset": "-63d"
+        }
       },
       "type": "raster"
     },
@@ -61,20 +59,42 @@
       ],
       "data_source": {
         "class_path": "rslearn.data_sources.planetary_computer.Sentinel2",
-        "duration": "900d",
+        "duration": "720d",
         "ingest": false,
         "init_args": {
           "harmonize": true,
           "sort_by": "eo:cloud_cover"
         },
         "query_config": {
-          "max_matches": 10,
+          "max_matches": 8,
           "per_period_mosaic_reverse_time_order": false,
           "period_duration": "90d",
           "space_mode": "MOSAIC"
         },
-        "time_offset": "-963d"
+        "time_offset": "-720d"
       },
+      "type": "raster"
+    },
+    "label_category": {
+      "band_sets": [
+        {
+          "bands": [
+            "label"
+          ],
+          "dtype": "uint8"
+        }
+      ],
+      "type": "raster"
+    },
+    "label_change_day": {
+      "band_sets": [
+        {
+          "bands": [
+            "label"
+          ],
+          "dtype": "uint16"
+        }
+      ],
       "type": "raster"
     },
     "output_category": {
