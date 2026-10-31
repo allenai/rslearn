@@ -102,7 +102,6 @@ SAMPLER_ARGS: dict[str, Any] = {
     "infrequent_key": "infreq",
     "num_infrequent": 8,
 }
-STAND_IN_GAP = timedelta(days=45)
 MASKING_ARGS: dict[str, Any] = {
     "category_target": "category",
     "change_day_target": "timestep",
@@ -148,46 +147,137 @@ def test_fewer_than_num_frequent() -> None:
     assert _values(input_dict) == INFREQUENT_VALUES + [0, 1]
 
 
-def test_stand_in_when_gap_is_large() -> None:
-    """The frequent image before the pick replaces the oldest infrequent image."""
-    sampler = ChangeTimeSeriesSampler(
-        **SAMPLER_ARGS, select="latest", stand_in_min_gap=STAND_IN_GAP
-    )
-    # The pick starts 7 weeks (49 days) after the first frequent image.
-    input_dict, _ = sampler(_inputs(11), _targets())
-    assert _values(input_dict) == INFREQUENT_VALUES[1:] + [6, 7, 8, 9, 10]
+def _history_kind(values: list[int], pick: list[int]) -> tuple[str, list[int]]:
+    """Classify the history of a sampled series whose frequent pick is known.
+
+    Returns:
+        tuple (kind, virtual values), where kind is "real" (the 8 infrequent images),
+        "merged" (a virtual image replaces the latest infrequent image) or "virtual"
+        (virtual images after the infrequent images, which drop the oldest ones).
+    """
+    assert values[-len(pick) :] == pick
+    history = values[: -len(pick)]
+    assert len(history) == 8
+    infrequent = [v for v in history if v >= INFREQUENT_VALUE]
+    virtual = [v for v in history if v < INFREQUENT_VALUE]
+    # The infrequent images come first, then the virtual images.
+    assert history == infrequent + virtual
+    if not virtual:
+        assert infrequent == INFREQUENT_VALUES
+        return "real", virtual
+    if infrequent == INFREQUENT_VALUES[: 8 - len(virtual)]:
+        return "merged", virtual
+    assert infrequent == INFREQUENT_VALUES[len(virtual) :]
+    return "virtual", virtual
 
 
-def test_no_stand_in_when_gap_is_small() -> None:
-    """No stand-in is used if the gap is less than stand_in_min_gap."""
-    sampler = ChangeTimeSeriesSampler(
-        **SAMPLER_ARGS, select="latest", stand_in_min_gap=STAND_IN_GAP
-    )
-    # The pick starts 5 weeks (35 days) after the first frequent image.
-    input_dict, _ = sampler(_inputs(9), _targets())
-    assert _values(input_dict) == INFREQUENT_VALUES + [5, 6, 7, 8]
-
-
-def test_no_stand_in_by_default() -> None:
-    """Without stand_in_min_gap, no stand-in is used."""
+def test_no_virtual_history_by_default() -> None:
+    """Without infrequent_period, only the infrequent images are used as history."""
     sampler = ChangeTimeSeriesSampler(**SAMPLER_ARGS, select="latest")
     input_dict, _ = sampler(_inputs(11), _targets())
     assert _values(input_dict) == INFREQUENT_VALUES + [7, 8, 9, 10]
 
 
-def test_stand_in_with_instant_timestamps() -> None:
-    """The stand-in rule works when mosaic timestamps are single scene times."""
+def test_no_virtual_history_without_gap() -> None:
+    """If the pick starts at the first frequent image, there is no virtual history."""
     sampler = ChangeTimeSeriesSampler(
-        **SAMPLER_ARGS, select="latest", stand_in_min_gap=STAND_IN_GAP
+        **SAMPLER_ARGS, select="latest", infrequent_period=QUARTER
     )
-    for num_images, expected in [
-        (9, INFREQUENT_VALUES + [5, 6, 7, 8]),
-        (11, INFREQUENT_VALUES[1:] + [6, 7, 8, 9, 10]),
-    ]:
+    for seed in range(20):
+        random.seed(seed)
+        input_dict, _ = sampler(_inputs(4), _targets())
+        assert _values(input_dict) == INFREQUENT_VALUES + [0, 1, 2, 3]
+
+
+def test_virtual_history_short_gap() -> None:
+    """A gap shorter than one period is one virtual period or merged into the last.
+
+    The pick starts 7 weeks (49 days) after the first frequent image. Rounding up gives
+    one 49-day virtual period, so a random frequent image before the pick follows the
+    infrequent images (dropping the oldest). Rounding down merges the gap into the last
+    infrequent period, which is then represented by the infrequent image with
+    probability 90 / 139, and otherwise by a random frequent image in the gap.
+    """
+    sampler = ChangeTimeSeriesSampler(
+        **SAMPLER_ARGS, select="latest", infrequent_period=QUARTER
+    )
+    counts = {"real": 0, "merged": 0, "virtual": 0}
+    virtual_values = set()
+    num_samples = 2000
+    random.seed(0)
+    for _ in range(num_samples):
+        input_dict, _ = sampler(_inputs(11), _targets())
+        kind, virtual = _history_kind(_values(input_dict), [7, 8, 9, 10])
+        assert len(virtual) <= 1
+        counts[kind] += 1
+        virtual_values.update(virtual)
+    assert virtual_values == set(range(7))
+    assert abs(counts["virtual"] / num_samples - 0.5) < 0.05
+    assert abs(counts["real"] / num_samples - 0.5 * 90 / 139) < 0.05
+    assert abs(counts["merged"] / num_samples - 0.5 * 49 / 139) < 0.05
+
+
+def test_virtual_history_long_gap() -> None:
+    """A long gap is split into equal virtual periods, each with one random image.
+
+    The pick starts 36 weeks (252 days = 2.8 periods) after the first frequent image,
+    so there are 3 virtual periods of 12 weeks, or 2 of 18 weeks.
+    """
+    sampler = ChangeTimeSeriesSampler(
+        **SAMPLER_ARGS, select="latest", infrequent_period=QUARTER
+    )
+    num_virtual = set()
+    random.seed(0)
+    for _ in range(200):
+        input_dict, _ = sampler(_inputs(40), _targets())
+        kind, virtual = _history_kind(_values(input_dict), [36, 37, 38, 39])
+        assert kind == "virtual"
+        num_virtual.add(len(virtual))
+        weeks_per_period = 36 // len(virtual)
+        for period, value in enumerate(virtual):
+            assert period * weeks_per_period <= value < (period + 1) * weeks_per_period
+    assert num_virtual == {2, 3}
+
+
+def test_virtual_history_skips_empty_periods() -> None:
+    """Virtual periods without frequent images are skipped."""
+    sampler = ChangeTimeSeriesSampler(
+        **SAMPLER_ARGS, select="latest", infrequent_period=QUARTER
+    )
+    # 40 weekly periods, but weeks 12-23 (the second of 3 virtual periods) are empty.
+    weeks = list(range(12)) + list(range(24, 40))
+    frequent = _series(WINDOW_START, WEEK, 40)
+    frequent = RasterImage(
+        frequent.image[:, weeks],
+        timestamps=[frequent.timestamps[week] for week in weeks],  # type: ignore[index]
+    )
+    random.seed(0)
+    num_virtual = set()
+    for _ in range(200):
         input_dict = {
-            "freq": _series(
-                WINDOW_START, WEEK, num_images, instant_offset=timedelta(days=2)
-            ),
+            "freq": frequent,
+            "infreq": _inputs(1)["infreq"],
+        }
+        input_dict, _ = sampler(input_dict, _targets())
+        kind, virtual = _history_kind(_values(input_dict), [36, 37, 38, 39])
+        assert kind == "virtual"
+        num_virtual.add(len(virtual))
+        assert not any(12 <= v < 24 for v in virtual)
+    # With 3 periods the middle one is skipped; with 2 periods (weeks 0-17 and 18-35)
+    # both have images.
+    assert num_virtual == {2}
+
+
+def test_virtual_history_with_instant_timestamps() -> None:
+    """Virtual history works when mosaic timestamps are single scene times."""
+    sampler = ChangeTimeSeriesSampler(
+        **SAMPLER_ARGS, select="latest", infrequent_period=QUARTER
+    )
+    random.seed(0)
+    kinds = set()
+    for _ in range(200):
+        input_dict = {
+            "freq": _series(WINDOW_START, WEEK, 11, instant_offset=timedelta(days=2)),
             "infreq": _series(
                 WINDOW_START - 8 * QUARTER,
                 QUARTER,
@@ -197,7 +287,12 @@ def test_stand_in_with_instant_timestamps() -> None:
             ),
         }
         input_dict, _ = sampler(input_dict, _targets())
-        assert _values(input_dict) == expected
+        kind, virtual = _history_kind(_values(input_dict), [7, 8, 9, 10])
+        kinds.add(kind)
+        assert all(v < 7 for v in virtual)
+        timestamps = input_dict["image"].timestamps
+        assert timestamps == sorted(timestamps)
+    assert kinds == {"real", "merged", "virtual"}
 
 
 def test_random_start_covers_window() -> None:
@@ -229,25 +324,26 @@ def test_reduction_keeps_latest() -> None:
     assert counts == {1, 2, 3}
 
 
-def test_reduction_never_uses_dropped_image_as_stand_in() -> None:
-    """The stand-in is the image just before the original pick."""
+def test_reduction_never_uses_dropped_image_as_virtual_history() -> None:
+    """Virtual history is chosen before the original pick, not the kept images."""
     random.seed(0)
     sampler = ChangeTimeSeriesSampler(
-        **SAMPLER_ARGS, full_frequent_probability=0, stand_in_min_gap=STAND_IN_GAP
+        **SAMPLER_ARGS, full_frequent_probability=0, infrequent_period=QUARTER
     )
-    num_stand_ins = 0
-    for _ in range(200):
+    num_virtual = 0
+    for _ in range(300):
         input_dict, _ = sampler(_inputs(16), _targets())
+        values = _values(input_dict)
         frequent = _frequent_values(input_dict)
-        kept = frequent[-1] - 3, frequent[-1]
-        if len(_values(input_dict)) - len(frequent) == 7:
-            # The first frequent value is the stand-in, one before the pick start.
-            assert frequent[0] == kept[0] - 1
-            assert all(v > kept[0] for v in frequent[1:-1])
-            num_stand_ins += 1
-        else:
-            assert all(kept[0] <= v for v in frequent)
-    assert num_stand_ins > 0
+        # The original pick ends at the last kept image and has 4 images.
+        pick_start = frequent[-1] - 3
+        num_kept = len(values) - 8
+        kept = frequent[-num_kept:]
+        assert kept == list(range(frequent[-1] - num_kept + 1, frequent[-1] + 1))
+        virtual = frequent[:-num_kept]
+        assert all(v < pick_start for v in virtual)
+        num_virtual += len(virtual)
+    assert num_virtual > 0
 
 
 def test_full_frequent_probability_one() -> None:

@@ -1,5 +1,6 @@
 """Sample one change alert time series per example."""
 
+import math
 import random
 from datetime import UTC, datetime, timedelta
 from typing import Any, Literal
@@ -10,6 +11,10 @@ from rslearn.train.model_context import RasterImage
 from rslearn.train.transforms.transform import Transform
 
 UNIX_EPOCH = datetime(1970, 1, 1, tzinfo=UTC)
+
+# The probability of rounding the number of virtual infrequent periods up rather than
+# down (see ChangeTimeSeriesSampler).
+ROUND_UP_PROBABILITY = 0.5
 
 
 def midpoint_day(time_range: tuple[datetime, datetime]) -> int:
@@ -47,13 +52,25 @@ class ChangeTimeSeriesSampler(Transform):
        full_frequent_probability, and otherwise only the latest n of them, with n
        uniform between 1 and num_frequent - 1. This simulates prediction windows where
        some frequent periods have no images.
-    3. Take the latest num_infrequent infrequent images that end at or before the start
-       of the pick. If stand_in_min_gap is set and the pick starts at least that long
-       after the first frequent image, the frequent image just before the pick is used
-       as a stand-in for the most recent infrequent image, replacing the oldest one.
-       The frequent images dropped in step 2 are never used as the stand-in.
-    4. Concatenate the infrequent images (and stand-in) and the kept frequent images
-       chronologically into input_dict[output_key].
+    3. Take the infrequent images that end at or before the start of the pick. If
+       infrequent_period is set, the frequent images between the end of the
+       infrequent input (the first frequent image) and the start of the pick also
+       serve as virtual history (see below). Keep the latest num_infrequent images.
+    4. Concatenate the history and the kept frequent images chronologically into
+       input_dict[output_key].
+
+    Virtual history makes the history end at the start of the pick, as in a prediction
+    window, where the infrequent images end where the frequent images begin. The gap
+    between the first frequent image and the start of the pick is divided into virtual
+    infrequent periods: gap / infrequent_period, rounded up with probability
+    ROUND_UP_PROBABILITY and down otherwise, as n periods of equal duration. Each
+    virtual period is represented by one frequent image chosen at random within it,
+    like a mosaic whose timestamp is that of one scene within its period. Virtual
+    periods without frequent images are skipped. If rounding down gives no periods, the
+    gap is merged into the last infrequent period instead: that period is represented
+    by the infrequent image or, with probability gap / (gap + infrequent_period), by a
+    random frequent image in the gap. The frequent images dropped in step 2 are after
+    the start of the pick, so they are never used as virtual history.
 
     The timestep at which the change appears is predicted with PerPixelTimestepTask
     and PerPixelTimestepHead (with mode AFTER), which map the change day labels to the
@@ -75,7 +92,7 @@ class ChangeTimeSeriesSampler(Transform):
         output_key: str = "image",
         select: Literal["random", "latest"] = "random",
         full_frequent_probability: float = 0.5,
-        stand_in_min_gap: timedelta | None = None,
+        infrequent_period: timedelta | None = None,
         category_target: str | None = None,
         change_day_target: str | None = None,
     ) -> None:
@@ -94,13 +111,12 @@ class ChangeTimeSeriesSampler(Transform):
             full_frequent_probability: with select="random", the probability of
                 keeping all of the picked frequent images. Otherwise fewer are kept.
                 Set to 1 to always keep all of them.
-            stand_in_min_gap: if set, use a stand-in for the most recent infrequent
-                image when the pick starts at least this long after the first frequent
-                image, e.g. half of the infrequent period. The gap is measured from the
-                first frequent image rather than from the infrequent images, since
-                mosaic timestamps are the time of a single scene within the period, and
-                the frequent layer starts where the infrequent layer ends. If None, no
-                stand-in is used.
+            infrequent_period: the period of the infrequent images, e.g. 90 days. If
+                set, frequent images before the pick are used as virtual history (see
+                the class docstring). The gap is measured from the first frequent image
+                rather than from the infrequent images, since mosaic timestamps are the
+                time of a single scene within the period, and the frequent layer starts
+                where the infrequent layer ends. If None, no virtual history is used.
             category_target: the category target whose valid mask is cleared at
                 pixels whose change is outside the time series. Must be set together
                 with change_day_target. This is only needed if change dates vary
@@ -129,7 +145,7 @@ class ChangeTimeSeriesSampler(Transform):
         self.output_key = output_key
         self.select = select
         self.full_frequent_probability = full_frequent_probability
-        self.stand_in_min_gap = stand_in_min_gap
+        self.infrequent_period = infrequent_period
         self.category_target = category_target
         self.change_day_target = change_day_target
 
@@ -146,7 +162,7 @@ class ChangeTimeSeriesSampler(Transform):
     def _select_history(
         self, frequent: RasterImage, pick_start_idx: int, input_dict: dict[str, Any]
     ) -> list[tuple[RasterImage, int]]:
-        """Select the infrequent images (and stand-in) before the pick.
+        """Select the history (infrequent and virtual images) before the pick.
 
         Args:
             frequent: the frequent input.
@@ -167,29 +183,68 @@ class ChangeTimeSeriesSampler(Transform):
             )
 
         pick_start = frequent.timestamps[pick_start_idx][0]
-        eligible = [
-            idx
+        history: list[tuple[RasterImage, int]] = [
+            (infrequent, idx)
             for idx, (_, end) in enumerate(infrequent.timestamps)
             if end <= pick_start
         ]
-        history = [(infrequent, idx) for idx in eligible[-self.num_infrequent :]]
-        if (
-            self.stand_in_min_gap is None
-            or pick_start_idx == 0
-            or pick_start - frequent.timestamps[0][0] < self.stand_in_min_gap
-        ):
-            return history
+        if self.infrequent_period is not None and pick_start_idx > 0:
+            history = self._add_virtual_history(frequent, pick_start_idx, history)
+        history.sort(key=lambda item: item[0].timestamps[item[1]][0])  # type: ignore[index]
+        return history[-self.num_infrequent :]
 
-        stand_in_idx = pick_start_idx - 1
-        # Keep the time series chronological.
-        if eligible and (
-            frequent.timestamps[stand_in_idx][0]
-            < infrequent.timestamps[eligible[-1]][1]
-        ):
+    def _add_virtual_history(
+        self,
+        frequent: RasterImage,
+        pick_start_idx: int,
+        history: list[tuple[RasterImage, int]],
+    ) -> list[tuple[RasterImage, int]]:
+        """Add frequent images before the pick as virtual infrequent images.
+
+        Args:
+            frequent: the frequent input.
+            pick_start_idx: the index of the first picked frequent image.
+            history: the infrequent images that end before the pick.
+
+        Returns:
+            the history with the virtual images (not yet sorted or truncated).
+        """
+        assert self.infrequent_period is not None
+        assert frequent.timestamps is not None
+        gap_start = frequent.timestamps[0][0]
+        gap = frequent.timestamps[pick_start_idx][0] - gap_start
+        if gap <= timedelta(0):
             return history
-        if len(history) == self.num_infrequent:
-            history = history[1:]
-        history.append((frequent, stand_in_idx))
+        # The frequent images that can be virtual history, with their offsets into
+        # the gap.
+        candidates = [
+            (idx, frequent.timestamps[idx][0] - gap_start)
+            for idx in range(pick_start_idx)
+        ]
+
+        ratio = gap / self.infrequent_period
+        if random.random() < ROUND_UP_PROBABILITY:
+            num_periods = math.ceil(ratio)
+        else:
+            num_periods = math.floor(ratio)
+
+        if num_periods == 0:
+            # Merge the gap into the last infrequent period, which is then represented
+            # by a random time within the merged period.
+            if history and random.random() >= gap / (gap + self.infrequent_period):
+                return history
+            idx = random.choice(candidates)[0]
+            return history[:-1] + [(frequent, idx)]
+
+        virtual_duration = gap / num_periods
+        for period in range(num_periods):
+            in_period = [
+                idx
+                for idx, offset in candidates
+                if period * virtual_duration <= offset < (period + 1) * virtual_duration
+            ]
+            if in_period:
+                history.append((frequent, random.choice(in_period)))
         return history
 
     def forward(

@@ -142,9 +142,9 @@ data:
             infrequent_key: infreq
             num_infrequent: 8
             output_key: sentinel2_l2a
-            # Use a stand-in for the most recent infrequent image when the pick starts
-            # at least half of an infrequent period into the frequent images.
-            stand_in_min_gap: "45 days, 0:00:00"
+            # Use frequent images before the pick as virtual infrequent history, so
+            # that the history ends at the pick as in a prediction window.
+            infrequent_period: "90 days, 0:00:00"
             # Only needed if change dates vary within a window.
             category_target: category
             change_day_target: timestep
@@ -178,7 +178,7 @@ data:
             infrequent_key: infreq
             num_infrequent: 8
             output_key: sentinel2_l2a
-            stand_in_min_gap: "45 days, 0:00:00"
+            infrequent_period: "90 days, 0:00:00"
             select: latest
         - class_path: rslearn.models.olmoearth_pretrain.norm.OlmoEarthNormalize
           init_args:
