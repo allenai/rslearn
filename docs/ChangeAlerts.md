@@ -25,8 +25,6 @@ quarterly infrequent images, as in the [example configs](#example-configs).
 - **Category raster**: the per-pixel change category label. It usually includes an invalid category for unlabeled pixels (e.g. 0) and a "no change" category (e.g. 1).
 - **Change day raster**: the per-pixel change date label, as the number of days since 1970-01-01 (UTC), with 65535 at pixels without a change.
 - **Frequent images**: the most recent mosaics, with one per frequent period, materialized in the `frequent` layer.
-  An example configuration is to have 7-day periods, with 4 max matches and a 56-day time range.
-  Setting the time range longer than `(# frequent periods) * (# frequent images)` is useful since some frequent periods may not have any images; they would be skipped with earlier periods acting as a fallback.
 - **Infrequent images**: mosaics with one per infrequent period, materialized in the `infrequent` layer, providing historical context before the frequent images.
 - **Detection range**: detect changes up to this duration into the past from the end of the input time series.
   During training, we will only pick inputs such that the change date is within this duration of the end of the latest frequent period.

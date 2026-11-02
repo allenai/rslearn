@@ -57,7 +57,8 @@ class ChangeTimeSeriesSampler(Transform):
        infrequent input (the first frequent image) and the start of the pick also
        serve as virtual history (see below). Keep the latest num_infrequent images.
     4. Concatenate the history and the kept frequent images chronologically into
-       input_dict[output_key].
+       input_dict[output_key], and remove the frequent and infrequent inputs from
+       input_dict.
 
     Virtual history makes the history end at the start of the pick, as in a prediction
     window, where the infrequent images end where the frequent images begin. The gap
@@ -283,6 +284,9 @@ class ChangeTimeSeriesSampler(Transform):
             [raster.image[:, idx : idx + 1] for raster, idx in selected], dim=1
         )
         timestamps = [raster.timestamps[idx] for raster, idx in selected]  # type: ignore[index]
+        input_dict.pop(self.frequent_key)
+        if self.infrequent_key is not None:
+            input_dict.pop(self.infrequent_key, None)
         input_dict[self.output_key] = RasterImage(image, timestamps=timestamps)
 
         # During prediction with MultiTask, the per-task target dicts are present but
