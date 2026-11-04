@@ -210,11 +210,14 @@ class RslearnLightningModule(L.LightningModule):
         return d
 
     def on_train_epoch_start(self) -> None:
-        """If we are in a multi-dataset distributed strategy, set the epoch."""
+        """Set the epoch on the distributed sampler so shuffling varies each epoch."""
         try:
             self.trainer.train_dataloader.batch_sampler.set_epoch(self.current_epoch)
         except AttributeError:
-            # Fail silently for single-dataset case, which is okay
+            pass
+        try:
+            self.trainer.train_dataloader.sampler.set_epoch(self.current_epoch)
+        except AttributeError:
             pass
 
     @rank_zero_only
