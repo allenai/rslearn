@@ -75,15 +75,18 @@ class TestOmniCloudMaskFirstValid:
             red_band=BANDS[0], green_band=BANDS[1], nir_band=BANDS[2]
         )
 
-        # Mock predict_from_array: cloudy item gets thick cloud, clear item gets all clear.
+        # Mock predict_from_batch: cloudy item gets thick cloud, clear item gets all clear.
         # Check the first real pixel (not padding) to distinguish items.
-        def mock_predict(input_array: Any) -> np.ndarray:
+        def mock_predict_one(input_array: Any) -> np.ndarray:
             h, w = input_array.shape[1], input_array.shape[2]
             if input_array[0, 0, 0] == 100:
                 return np.ones((h, w), dtype=np.uint8)  # class 1 = thick cloud
             return np.zeros((h, w), dtype=np.uint8)  # class 0 = clear
 
-        with patch("rslearn.dataset.omni_cloud_mask.predict_from_array", mock_predict):
+        def mock_predict(data: Any, batch_size: int) -> np.ndarray:
+            return np.stack([mock_predict_one(arr)[None] for arr in data])
+
+        with patch("rslearn.dataset.omni_cloud_mask.predict_from_batch", mock_predict):
             # Pass cloudy first, clear second -- compositor should reorder.
             result = list(
                 compositor.build_composites(
@@ -109,9 +112,9 @@ class TestOmniCloudMaskFirstValid:
             red_band=BANDS[0], green_band=BANDS[1], nir_band=BANDS[2]
         )
 
-        # predict_from_array should NOT be called for a single-item group.
+        # predict_from_batch should NOT be called for a single-item group.
         with patch(
-            "rslearn.dataset.omni_cloud_mask.predict_from_array",
+            "rslearn.dataset.omni_cloud_mask.predict_from_batch",
             side_effect=AssertionError("should not be called"),
         ):
             result = list(
@@ -140,14 +143,20 @@ class TestOmniCloudMaskFirstValid:
             red_band=BANDS[0], green_band=BANDS[1], nir_band=BANDS[2]
         )
 
-        def mock_predict(input_array: Any) -> np.ndarray:
+        def mock_predict_one(input_array: Any) -> np.ndarray:
             if input_array[0, 0, 0] == 99:
                 raise RuntimeError("simulated failure")
             h, w = input_array.shape[1], input_array.shape[2]
             return np.zeros((h, w), dtype=np.uint8)
 
+        def mock_predict(data: Any, batch_size: int) -> np.ndarray:
+            return np.stack([mock_predict_one(arr)[None] for arr in data])
+
         with (
-            patch("rslearn.dataset.omni_cloud_mask.predict_from_array", mock_predict),
+            patch(
+                "rslearn.dataset.omni_cloud_mask.predict_from_batch",
+                side_effect=mock_predict,
+            ),
             pytest.raises(RuntimeError, match="simulated failure"),
         ):
             list(
@@ -207,7 +216,7 @@ class TestOmniCloudMaskFirstValid:
                 )
             )
 
-        def mock_predict(input_array: Any) -> np.ndarray:
+        def mock_predict_one(input_array: Any) -> np.ndarray:
             if input_array.shape != (3, 4, 4):
                 raise AssertionError(
                     f"expected 20 m scoring shape (3, 4, 4), got {input_array.shape}"
@@ -215,6 +224,9 @@ class TestOmniCloudMaskFirstValid:
             if input_array[0, 0, 0] == 100:
                 return np.ones((4, 4), dtype=np.uint8)
             return np.zeros((4, 4), dtype=np.uint8)
+
+        def mock_predict(data: Any, batch_size: int) -> np.ndarray:
+            return np.stack([mock_predict_one(arr)[None] for arr in data])
 
         def mock_first_valid_build_composite(
             self: Any,
@@ -256,7 +268,10 @@ class TestOmniCloudMaskFirstValid:
                 "rslearn.dataset.omni_cloud_mask.read_raster_window_from_tiles",
                 side_effect=mock_read_raster_window_from_tiles,
             ),
-            patch("rslearn.dataset.omni_cloud_mask.predict_from_array", mock_predict),
+            patch(
+                "rslearn.dataset.omni_cloud_mask.predict_from_batch",
+                side_effect=mock_predict,
+            ) as predict,
             patch(
                 "rslearn.dataset.omni_cloud_mask.FirstValidCompositor.build_composite",
                 new=mock_first_valid_build_composite,
@@ -295,6 +310,7 @@ class TestOmniCloudMaskFirstValid:
             ("clear", scoring_projection, scoring_bounds),
         ]
         assert sorted_groups == [["clear", "cloudy"], ["clear", "cloudy"]]
+        predict.assert_called_once()
 
     def test_default_scoring_uses_each_materialization_grid(self) -> None:
         """Unset scoring resolution should rank on each materialization grid."""
@@ -341,11 +357,14 @@ class TestOmniCloudMaskFirstValid:
                 )
             )
 
-        def mock_predict(input_array: Any) -> np.ndarray:
+        def mock_predict_one(input_array: Any) -> np.ndarray:
             h, w = input_array.shape[1], input_array.shape[2]
             if input_array[0, 0, 0] == 100:
                 return np.ones((h, w), dtype=np.uint8)
             return np.zeros((h, w), dtype=np.uint8)
+
+        def mock_predict(data: Any, batch_size: int) -> np.ndarray:
+            return np.stack([mock_predict_one(arr)[None] for arr in data])
 
         tile_store = TileStoreWithLayer(DefaultTileStore(), LAYER_NAME)
         with (
@@ -357,7 +376,10 @@ class TestOmniCloudMaskFirstValid:
                 "rslearn.dataset.omni_cloud_mask.read_raster_window_from_tiles",
                 side_effect=mock_read_raster_window_from_tiles,
             ),
-            patch("rslearn.dataset.omni_cloud_mask.predict_from_array", mock_predict),
+            patch(
+                "rslearn.dataset.omni_cloud_mask.predict_from_batch",
+                side_effect=mock_predict,
+            ) as predict,
             patch(
                 "rslearn.dataset.omni_cloud_mask.FirstValidCompositor.build_composite",
                 return_value=RasterArray(array=np.zeros((1, 1, 1, 1), dtype=np.uint8)),
@@ -398,6 +420,8 @@ class TestOmniCloudMaskFirstValid:
             ("clear", base_projection, base_bounds),
         ]
 
+        assert predict.call_count == 2
+
     def test_scoring_resolution_must_be_positive(self) -> None:
         """Explicit scoring_resolution should be positive."""
         with pytest.raises(ValueError, match="scoring_resolution must be positive"):
@@ -407,3 +431,158 @@ class TestOmniCloudMaskFirstValid:
                 nir_band="B08",
                 scoring_resolution=0,
             )
+
+    @pytest.mark.parametrize("shape", [(96, 48), (48, 96), (8, 16), (16, 8)])
+    @pytest.mark.parametrize("batch_size", [1, 3])
+    def test_batch_scoring_crops_spatial_axes(
+        self, shape: tuple[int, int], batch_size: int
+    ) -> None:
+        """Clouds below the first width rows and padding must not change the crop."""
+        height, width = shape
+        items = [_make_item("half_cloudy"), _make_item("thin_cloud")]
+        arrays = [np.full((3, height, width), v, dtype=np.float32) for v in [100, 200]]
+        compositor = OmniCloudMaskFirstValid(batch_size=batch_size)
+
+        def mock_predict(data: Any, batch_size: int) -> np.ndarray:
+            assert batch_size == compositor.batch_size
+            assert len(data) == 2
+            h, w = max(height, 32), max(width, 32)
+            assert all(arr.shape == (3, h, w) for arr in data)
+            for arr, original in zip(data, arrays, strict=True):
+                np.testing.assert_array_equal(arr[:, :height, :width], original)
+                assert not arr[:, height:, :].any()
+                assert not arr[:, :, width:].any()
+            masks = np.zeros((2, 1, h, w), dtype=np.uint8)
+            masks[0, 0, height // 2 : height, :width] = 1
+            # Give padding a different class to detect inclusion in the score.
+            masks[1] = 1
+            masks[1, 0, :height, :width] = 2
+            return masks
+
+        with (
+            patch(
+                "rslearn.dataset.omni_cloud_mask.get_needed_band_sets_and_indexes",
+                return_value=[(BANDS, [0, 1, 2], [0, 1, 2])],
+            ),
+            patch(
+                "rslearn.dataset.omni_cloud_mask.read_raster_window_from_tiles",
+                side_effect=[RasterArray(chw_array=arr) for arr in arrays],
+            ),
+            patch(
+                "rslearn.dataset.omni_cloud_mask.predict_from_batch",
+                side_effect=mock_predict,
+            ) as predict,
+        ):
+            result = compositor._sort_group(
+                items,
+                TileStoreWithLayer(DefaultTileStore(), LAYER_NAME),
+                PROJECTION,
+                (0, 0, width, height),
+                Resampling.bilinear,
+            )
+        assert result == items[::-1]
+        predict.assert_called_once()
+
+    def test_partial_coverage_does_not_score_nodata_as_clear(self) -> None:
+        items = [_make_item("partial_cloudy"), _make_item("thin_cloud")]
+        # A pixel is valid even if only one of the scoring bands is nonzero.
+        partial = np.zeros((3, 4, 4), dtype=np.float32)
+        partial[1, 0, 0] = 100
+        full = np.full((3, 4, 4), 200, dtype=np.float32)
+        masks = np.zeros((2, 1, 32, 32), dtype=np.uint8)
+        masks[0, 0, 0, 0] = 1
+        masks[1, 0, :4, :4] = 2
+        with (
+            patch(
+                "rslearn.dataset.omni_cloud_mask.get_needed_band_sets_and_indexes",
+                return_value=[(BANDS, [0, 1, 2], [0, 1, 2])],
+            ),
+            patch(
+                "rslearn.dataset.omni_cloud_mask.read_raster_window_from_tiles",
+                side_effect=[RasterArray(chw_array=arr) for arr in [partial, full]],
+            ),
+            patch(
+                "rslearn.dataset.omni_cloud_mask.predict_from_batch", return_value=masks
+            ),
+        ):
+            result = OmniCloudMaskFirstValid()._sort_group(
+                items,
+                TileStoreWithLayer(DefaultTileStore(), LAYER_NAME),
+                PROJECTION,
+                BOUNDS,
+                Resampling.bilinear,
+            )
+        assert result == items[::-1]
+
+    @pytest.mark.parametrize("has_valid_items", [False, True])
+    def test_skips_missing_and_all_nodata_items(self, has_valid_items: bool) -> None:
+        items = [_make_item(name) for name in ["missing", "nodata", "first", "second"]]
+        reads = [None, RasterArray(chw_array=np.zeros((3, 4, 4), dtype=np.float32))]
+        if has_valid_items:
+            reads.extend(
+                [RasterArray(chw_array=np.ones((3, 4, 4), dtype=np.float32))] * 2
+            )
+        else:
+            items = items[:2]
+        with (
+            patch(
+                "rslearn.dataset.omni_cloud_mask.get_needed_band_sets_and_indexes",
+                return_value=[(BANDS, [0, 1, 2], [0, 1, 2])],
+            ),
+            patch(
+                "rslearn.dataset.omni_cloud_mask.read_raster_window_from_tiles",
+                side_effect=reads,
+            ),
+            patch(
+                "rslearn.dataset.omni_cloud_mask.predict_from_batch",
+                return_value=np.zeros((2, 1, 32, 32), dtype=np.uint8),
+            ) as predict,
+        ):
+            result = OmniCloudMaskFirstValid()._sort_group(
+                items,
+                TileStoreWithLayer(DefaultTileStore(), LAYER_NAME),
+                PROJECTION,
+                BOUNDS,
+                Resampling.bilinear,
+            )
+        # Equal scores preserve input order, including after skipping missing items.
+        assert result == items[2:]
+        if has_valid_items:
+            predict.assert_called_once()
+            assert len(predict.call_args.args[0]) == 2
+        else:
+            predict.assert_not_called()
+
+    def test_custom_class_weights(self) -> None:
+        compositor = OmniCloudMaskFirstValid(
+            clear_weight=2,
+            thick_cloud_weight=8,
+            thin_cloud_weight=4,
+            cloud_shadow_weight=6,
+        )
+        mask = np.array([[[0, 1, 2, 3, 0]]], dtype=np.uint8)
+        valid = np.array([[True, True, True, True, False]])
+        assert compositor._score_mask(_make_item("weighted"), mask, valid) == 5
+
+    @pytest.mark.parametrize("batch_size", [0, -1])
+    def test_batch_size_must_be_positive(self, batch_size: int) -> None:
+        with pytest.raises(ValueError, match="batch_size must be positive"):
+            OmniCloudMaskFirstValid(batch_size=batch_size)
+
+    def test_missing_scoring_bands_raises(self) -> None:
+        with (
+            patch(
+                "rslearn.dataset.omni_cloud_mask.get_needed_band_sets_and_indexes",
+                return_value=[],
+            ),
+            patch("rslearn.dataset.omni_cloud_mask.predict_from_batch") as predict,
+            pytest.raises(ValueError, match="missing scoring bands.*missing_bands"),
+        ):
+            OmniCloudMaskFirstValid()._sort_group(
+                [_make_item("missing_bands")],
+                TileStoreWithLayer(DefaultTileStore(), LAYER_NAME),
+                PROJECTION,
+                BOUNDS,
+                Resampling.bilinear,
+            )
+        predict.assert_not_called()

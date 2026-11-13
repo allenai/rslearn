@@ -6,7 +6,7 @@ from datetime import datetime
 
 import numpy as np
 import numpy.typing as npt
-from omnicloudmask import predict_from_array
+from omnicloudmask import predict_from_batch
 from rasterio.enums import Resampling
 
 from rslearn.data_sources.data_source import ItemType
@@ -26,9 +26,9 @@ logger = get_logger(__name__)
 class OmniCloudMaskFirstValid(Compositor):
     """Sorts items by OmniCloudMask cloud score, then applies FIRST_VALID compositing.
 
-    For each item in the group, reads R/G/NIR bands from the tile store, runs
-    OmniCloudMask inference, and scores by cloud class fractions. Items are then
-    sorted best-to-worst and passed to the built-in first-valid compositor.
+    Reads R/G/NIR bands for the group from the tile store, runs batched
+    OmniCloudMask inference, and scores by cloud class fractions over valid pixels.
+    Items are sorted best-to-worst and passed to the built-in first-valid compositor.
 
     Requires the ``omnicloudmask`` package (optional dependency).
 
@@ -53,6 +53,7 @@ class OmniCloudMaskFirstValid(Compositor):
         thick_cloud_weight: int = 5,
         thin_cloud_weight: int = 1,
         cloud_shadow_weight: int = 1,
+        batch_size: int = 8,
     ) -> None:
         """Create a new OmniCloudMaskFirstValid.
 
@@ -72,6 +73,8 @@ class OmniCloudMaskFirstValid(Compositor):
             thick_cloud_weight: weight for thick cloud pixels when computing the score.
             thin_cloud_weight: weight for thin cloud pixels when computing the score.
             cloud_shadow_weight: weight for cloud shadow pixels when computing the score.
+            batch_size: number of images per inference batch. Lower this to reduce
+                device memory usage, especially for large scoring windows.
         """
         self.red_band = red_band
         self.green_band = green_band
@@ -82,6 +85,10 @@ class OmniCloudMaskFirstValid(Compositor):
         self.thick_cloud_weight = thick_cloud_weight
         self.thin_cloud_weight = thin_cloud_weight
         self.cloud_shadow_weight = cloud_shadow_weight
+        self.batch_size = batch_size
+
+        if self.batch_size <= 0:
+            raise ValueError("batch_size must be positive")
 
         if self.scoring_resolution is not None and self.scoring_resolution <= 0:
             raise ValueError("scoring_resolution must be positive")
@@ -146,24 +153,15 @@ class OmniCloudMaskFirstValid(Compositor):
 
         return projection, bounds
 
-    def _score_item(
+    def _read_scoring_array(
         self,
         item: ItemType,
         tile_store: TileStoreWithLayer,
         projection: Projection,
         bounds: PixelBounds,
         resampling_method: Resampling,
-    ) -> float | None:
-        """Score a single item using OmniCloudMask.
-
-        OmniCloudMask classifies each pixel into one of four classes:
-          0 = clear, 1 = thick cloud, 2 = thin cloud, 3 = cloud shadow.
-
-        We score by multiplying the number of pixels in each class by the corresponding
-        configurable weight. The default is 5*thick_cloud + thin_cloud + cloud_shadow.
-
-        Returns: the score, where lower scores should be preferred.
-        """
+    ) -> npt.NDArray[np.float32] | None:
+        """Read an item's R/G/NIR array, returning None if there is no valid data."""
         scoring_bands = [self.red_band, self.green_band, self.nir_band]
         # The NODATA values for the scoring bands are expected to be 0 for both Sentinel-2
         # and Landsat.
@@ -196,16 +194,19 @@ class OmniCloudMaskFirstValid(Compositor):
 
         arr = raster.array[:, 0, :, :]  # (3, H, W)
 
-        _, h, w = arr.shape
-        pad_h = max(0, self.min_inference_size - h)
-        pad_w = max(0, self.min_inference_size - w)
-        if pad_h > 0 or pad_w > 0:
-            arr = np.pad(arr, ((0, 0), (0, pad_h), (0, pad_w)), mode="constant")
+        if not arr.any():
+            return None
+        return arr
 
-        mask = predict_from_array(input_array=arr)
-
-        # Evaluate only the original (unpadded) region.
-        mask = mask[:h, :w]
+    def _score_mask(
+        self,
+        item: ItemType,
+        mask: npt.NDArray[np.uint8],
+        valid: npt.NDArray[np.bool_],
+    ) -> float:
+        """Score class fractions over valid pixels in the original, unpadded region."""
+        h, w = valid.shape
+        mask = mask[0, :h, :w][valid]
         clear_frac = float((mask == 0).mean())
         thick_frac = float((mask == 1).mean())
         thin_frac = float((mask == 2).mean())
@@ -237,22 +238,39 @@ class OmniCloudMaskFirstValid(Compositor):
         resampling_method: Resampling,
     ) -> list[ItemType]:
         """Sort a group once for the requested scoring grid."""
-        scored: list[tuple[float, ItemType]] = []
+        items: list[ItemType] = []
+        arrays: list[npt.NDArray[np.float32]] = []
+        valid_masks: list[npt.NDArray[np.bool_]] = []
         for item in group:
-            score = self._score_item(
+            arr = self._read_scoring_array(
                 item,
                 tile_store,
                 scoring_projection,
                 scoring_bounds,
                 resampling_method,
             )
-            if score is None:
-                # Missing image. We skip this item since we can't score it and
-                # anyway it likely also doesn't have the bands needed for compositing.
+            if arr is None:
                 logger.debug("no data for OmniCloudMask scoring of item %s", item.name)
                 continue
-            scored.append((score, item))
 
+            # Track valid pixels before padding; zero is nodata in the scoring bands.
+            valid_masks.append(arr.any(axis=0))
+            _, h, w = arr.shape
+            pad_h = max(0, self.min_inference_size - h)
+            pad_w = max(0, self.min_inference_size - w)
+            if pad_h > 0 or pad_w > 0:
+                arr = np.pad(arr, ((0, 0), (0, pad_h), (0, pad_w)), mode="constant")
+            items.append(item)
+            arrays.append(arr)
+
+        if not items:
+            return []
+
+        masks = predict_from_batch(arrays, batch_size=self.batch_size)
+        scored = [
+            (self._score_mask(item, mask, valid), item)
+            for item, mask, valid in zip(items, masks, valid_masks, strict=True)
+        ]
         scored.sort(key=lambda t: t[0])
         return [item for _, item in scored]
 
