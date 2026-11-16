@@ -54,6 +54,8 @@ class OmniCloudMaskFirstValid(Compositor):
         thin_cloud_weight: int = 1,
         cloud_shadow_weight: int = 1,
         batch_size: int = 8,
+        compile_models: bool = False,
+        inference_dtype: str = "fp32",
     ) -> None:
         """Create a new OmniCloudMaskFirstValid.
 
@@ -75,6 +77,12 @@ class OmniCloudMaskFirstValid(Compositor):
             cloud_shadow_weight: weight for cloud shadow pixels when computing the score.
             batch_size: number of images per inference batch. Lower this to reduce
                 device memory usage, especially for large scoring windows.
+            compile_models: whether to compile the OmniCloudMask models with
+                torch.compile. Compilation adds startup cost and may need to be
+                repeated for different scoring shapes.
+            inference_dtype: inference precision passed to OmniCloudMask, e.g.
+                "fp32", "fp16", or "bf16". Reduced precision can change predictions
+                and may be slower on CPUs; benchmark on the target hardware.
         """
         self.red_band = red_band
         self.green_band = green_band
@@ -86,6 +94,8 @@ class OmniCloudMaskFirstValid(Compositor):
         self.thin_cloud_weight = thin_cloud_weight
         self.cloud_shadow_weight = cloud_shadow_weight
         self.batch_size = batch_size
+        self.compile_models = compile_models
+        self.inference_dtype = inference_dtype
 
         if self.batch_size <= 0:
             raise ValueError("batch_size must be positive")
@@ -266,7 +276,12 @@ class OmniCloudMaskFirstValid(Compositor):
         if not items:
             return []
 
-        masks = predict_from_batch(arrays, batch_size=self.batch_size)
+        masks = predict_from_batch(
+            arrays,
+            batch_size=self.batch_size,
+            compile_models=self.compile_models,
+            inference_dtype=self.inference_dtype,
+        )
         scored = [
             (self._score_mask(item, mask, valid), item)
             for item, mask, valid in zip(items, masks, valid_masks, strict=True)

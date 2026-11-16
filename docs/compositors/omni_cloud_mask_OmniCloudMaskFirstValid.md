@@ -18,6 +18,8 @@ Configure as a custom compositor in `compositing_method`:
       "nir_band": "B8A",
       "scoring_resolution": 20.0,
       "batch_size": 8,
+      "compile_models": false,
+      "inference_dtype": "fp32",
       "clear_weight": 0,
       "thick_cloud_weight": 5,
       "thin_cloud_weight": 1,
@@ -58,6 +60,15 @@ Configure as a custom compositor in `compositing_method`:
   `predict_from_batch`. `batch_size` controls images per forward pass (default: 8)
   and must be positive. Reduce it to lower device memory usage. All scoring
   arrays and output masks for a group are held in host memory.
+- `compile_models` (default: `false`) is passed to OmniCloudMask to enable
+  `torch.compile`. Compilation adds startup cost, may be repeated for new scoring
+  shapes, and depends on the installed PyTorch compiler backend. OmniCloudMask can
+  warn and fall back to eager inference if compilation fails.
+- `inference_dtype` (default: `"fp32"`) is passed to OmniCloudMask. Use `"fp16"`
+  or `"bf16"` to opt into reduced precision. Performance depends on the device;
+  float16 is not necessarily faster on CPU, and reduced precision can change
+  masks, class fractions, and rankings. Benchmark the target hardware before
+  enabling either option.
 - Each image is inferred as a single patch without tiling. Large scoring windows
   can use more device memory and produce slightly different class fractions than
   `predict_from_array`, which uses overlapping patches of up to 1000 pixels.

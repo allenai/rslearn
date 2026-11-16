@@ -59,7 +59,17 @@ class TestOmniCloudMaskFirstValid:
                 LAYER_NAME, item, BANDS, PROJECTION, BOUNDS, RasterArray(chw_array=arr)
             )
 
-    def test_sorts_items_by_cloud_score(self, tmp_path: pathlib.Path) -> None:
+    @pytest.mark.parametrize(
+        "inference_options",
+        [
+            {},
+            {"compile_models": True, "inference_dtype": "fp16"},
+            {"compile_models": False, "inference_dtype": "bf16"},
+        ],
+    )
+    def test_sorts_items_by_cloud_score(
+        self, tmp_path: pathlib.Path, inference_options: dict[str, Any]
+    ) -> None:
         """Items should be reordered so the least cloudy is first."""
         store = DefaultTileStore()
         store.set_dataset_path(UPath(tmp_path))
@@ -72,7 +82,10 @@ class TestOmniCloudMaskFirstValid:
         self._write_items(store, [item_cloudy, item_clear], [cloudy_data, clear_data])
 
         compositor = OmniCloudMaskFirstValid(
-            red_band=BANDS[0], green_band=BANDS[1], nir_band=BANDS[2]
+            red_band=BANDS[0],
+            green_band=BANDS[1],
+            nir_band=BANDS[2],
+            **inference_options,
         )
 
         # Mock predict_from_batch: cloudy item gets thick cloud, clear item gets all clear.
@@ -83,7 +96,11 @@ class TestOmniCloudMaskFirstValid:
                 return np.ones((h, w), dtype=np.uint8)  # class 1 = thick cloud
             return np.zeros((h, w), dtype=np.uint8)  # class 0 = clear
 
-        def mock_predict(data: Any, batch_size: int) -> np.ndarray:
+        def mock_predict(data: Any, batch_size: int, **kwargs: Any) -> np.ndarray:
+            assert kwargs == {
+                "compile_models": inference_options.get("compile_models", False),
+                "inference_dtype": inference_options.get("inference_dtype", "fp32"),
+            }
             return np.stack([mock_predict_one(arr)[None] for arr in data])
 
         with patch("rslearn.dataset.omni_cloud_mask.predict_from_batch", mock_predict):
@@ -149,7 +166,7 @@ class TestOmniCloudMaskFirstValid:
             h, w = input_array.shape[1], input_array.shape[2]
             return np.zeros((h, w), dtype=np.uint8)
 
-        def mock_predict(data: Any, batch_size: int) -> np.ndarray:
+        def mock_predict(data: Any, batch_size: int, **kwargs: Any) -> np.ndarray:
             return np.stack([mock_predict_one(arr)[None] for arr in data])
 
         with (
@@ -225,7 +242,7 @@ class TestOmniCloudMaskFirstValid:
                 return np.ones((4, 4), dtype=np.uint8)
             return np.zeros((4, 4), dtype=np.uint8)
 
-        def mock_predict(data: Any, batch_size: int) -> np.ndarray:
+        def mock_predict(data: Any, batch_size: int, **kwargs: Any) -> np.ndarray:
             return np.stack([mock_predict_one(arr)[None] for arr in data])
 
         def mock_first_valid_build_composite(
@@ -363,7 +380,7 @@ class TestOmniCloudMaskFirstValid:
                 return np.ones((h, w), dtype=np.uint8)
             return np.zeros((h, w), dtype=np.uint8)
 
-        def mock_predict(data: Any, batch_size: int) -> np.ndarray:
+        def mock_predict(data: Any, batch_size: int, **kwargs: Any) -> np.ndarray:
             return np.stack([mock_predict_one(arr)[None] for arr in data])
 
         tile_store = TileStoreWithLayer(DefaultTileStore(), LAYER_NAME)
@@ -443,7 +460,7 @@ class TestOmniCloudMaskFirstValid:
         arrays = [np.full((3, height, width), v, dtype=np.float32) for v in [100, 200]]
         compositor = OmniCloudMaskFirstValid(batch_size=batch_size)
 
-        def mock_predict(data: Any, batch_size: int) -> np.ndarray:
+        def mock_predict(data: Any, batch_size: int, **kwargs: Any) -> np.ndarray:
             assert batch_size == compositor.batch_size
             assert len(data) == 2
             h, w = max(height, 32), max(width, 32)
