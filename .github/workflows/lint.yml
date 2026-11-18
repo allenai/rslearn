@@ -13,7 +13,8 @@ concurrency:
 
 jobs:
   linting:
-    runs-on: ubuntu-latest
+    # Python 3.11.13 has prebuilt binaries for Ubuntu 24.04, not newer runner images.
+    runs-on: ubuntu-24.04
 
     steps:
       - uses: actions/checkout@v4
@@ -24,7 +25,6 @@ jobs:
         uses: actions/setup-python@v4
         with:
           python-version: 3.11.13
-          pip-version: 24
 
       - name: Linting
         run: |
