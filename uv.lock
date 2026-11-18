@@ -788,6 +788,19 @@ wheels = [
 ]
 
 [[package]]
+name = "classcounter"
+version = "0.2.1"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "numpy", version = "2.4.6", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.12'" },
+    { name = "numpy", version = "2.5.4", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.12'" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/6b/f4/bf009e388f2fbac777bef279a8ea3556b92b850fb5ce874f529cd15f4f38/classcounter-0.2.1.tar.gz", hash = "sha256:0ce100e2fff53479e18674b7bc61e95000093bd107769282d6cc1b4e06623810", size = 27549, upload-time = "2026-10-19T03:45:10.732Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/af/7f/72f8745be56343104a7fbf0c1001f17fc6a432a6ba22c268d3a9998714c1/classcounter-0.2.1-py3-none-any.whl", hash = "sha256:01367beebb8ff879240b1243756e78f0a118cf13fce3a515686095b8f2d4a5e1", size = 14039, upload-time = "2026-10-19T03:45:09.376Z" },
+]
+
+[[package]]
 name = "click"
 version = "8.5.0"
 source = { registry = "https://pypi.org/simple" }
@@ -4179,9 +4192,10 @@ wheels = [
 
 [[package]]
 name = "omnicloudmask"
-version = "1.7.1"
+version = "1.8.1"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
+    { name = "classcounter" },
     { name = "gdown" },
     { name = "huggingface-hub" },
     { name = "platformdirs" },
@@ -4193,9 +4207,9 @@ dependencies = [
     { name = "torch" },
     { name = "tqdm" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/59/4c/647f719cfc2395d773462f0ac358e9ba834a7e637addeeb90c301dbe56e3/omnicloudmask-1.7.1.tar.gz", hash = "sha256:223e2bed5529e24e693810e897a0bad19eb9f9b20255aef1fab6145bfb62b3e0", size = 31461, upload-time = "2026-03-06T00:56:30.898Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/fb/fc/e9e95b4d74da3ed57667bb1f578e05fc23d2e399b5bc2894e47dba5d8d92/omnicloudmask-1.8.1.tar.gz", hash = "sha256:691cab8d842ad8de08183c6f0c6f1f1720a43c27803b4d689480281b5fbe018a", size = 71532, upload-time = "2026-10-26T02:09:55.589Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/a7/04/886c58e9cacb0d8fdd32d2744b2ad83c2f90815424323dc1f3062e563893/omnicloudmask-1.7.1-py3-none-any.whl", hash = "sha256:f54ba91da2b5f441df89ed69fb16c127d02ec562fe5bf4597043ac3904ffe176", size = 21527, upload-time = "2026-03-06T00:56:29.816Z" },
+    { url = "https://files.pythonhosted.org/packages/03/67/a83b636e7a54b897e8ebafec7a4e0fc9fba7eb9fce78e3ffd2052bcebd35/omnicloudmask-1.8.1-py3-none-any.whl", hash = "sha256:995b8c2f574a11d1579c36e8da66c42d81e63e4f907a7efa1bb4957a29646a0d", size = 35421, upload-time = "2026-10-26T02:09:54.321Z" },
 ]
 
 [[package]]
@@ -6628,7 +6642,7 @@ requires-dist = [
     { name = "numcodecs", marker = "extra == 'extra'", specifier = ">=0.16" },
     { name = "numpy", specifier = ">=1.24.1" },
     { name = "olmoearth-pretrain-minimal", marker = "extra == 'extra'", specifier = ">=0.1.3" },
-    { name = "omnicloudmask", marker = "extra == 'extra'", specifier = ">=1.7.1" },
+    { name = "omnicloudmask", marker = "extra == 'extra'", specifier = ">=1.8.0" },
     { name = "osmium", marker = "extra == 'extra'", specifier = ">=4.0.2" },
     { name = "pillow", specifier = ">=11.3" },
     { name = "planet", marker = "extra == 'extra'", specifier = ">=3.1" },
