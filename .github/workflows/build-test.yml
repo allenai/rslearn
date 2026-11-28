@@ -14,6 +14,9 @@ concurrency:
 jobs:
   test:
     runs-on: ubuntu-latest-m
+    permissions:
+      contents: read
+      id-token: write
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -31,12 +34,23 @@ jobs:
 
       - name: Run Unit and Integration Tests
         run: |
+          mkdir -p "$RUNNER_TEMP/coverage"
           docker run --rm \
+            -v "$RUNNER_TEMP/coverage:/coverage" \
             -e CI="true" \
             rslearn-test \
             pytest -n auto tests/unit/ tests/integration/ -vv \
             --ignore tests/unit/models/test_molmo.py \
-            --ignore tests/unit/models/test_clay.py
+            --ignore tests/unit/models/test_clay.py \
+            --cov --cov-report=xml:/coverage/coverage.xml
+
+      - name: Upload coverage to Codecov
+        uses: codecov/codecov-action@303a32d7a59b442fa8d48b6a1cc6825c09c847a5 # v7.1.1
+        with:
+          files: ${{ runner.temp }}/coverage/coverage.xml
+          disable_search: true
+          use_oidc: true
+          fail_ci_if_error: true
 
       - name: Clean up
         if: always()
