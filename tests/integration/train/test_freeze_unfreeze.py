@@ -62,6 +62,7 @@ def test_freeze_unfreeze(
     )
     record_callback = RecordParamsCallback()
     trainer = pl.Trainer(
+        accelerator="cpu",
         max_epochs=3,
         callbacks=[
             freeze_unfreeze,
@@ -94,6 +95,7 @@ def test_unfreeze_lr_factor(
         unfreeze_lr_factor=unfreeze_lr_factor,
     )
     trainer = pl.Trainer(
+        accelerator="cpu",
         max_epochs=2,
         callbacks=[freeze_unfreeze],
     )
