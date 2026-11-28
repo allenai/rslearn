@@ -196,6 +196,7 @@ def detection_model_config() -> dict:
             },
         },
         "trainer": {
+            "accelerator": "cpu",
             "max_epochs": 1,
             "callbacks": [
                 {

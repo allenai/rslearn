@@ -237,6 +237,7 @@ def multi_task_model_config() -> dict:
             },
         },
         "trainer": {
+            "accelerator": "cpu",
             "max_epochs": 1,
             "callbacks": [
                 {
