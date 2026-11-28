@@ -147,6 +147,7 @@ def embedding_model_config() -> dict:
             },
         },
         "trainer": {
+            "accelerator": "cpu",
             "callbacks": [
                 {
                     "class_path": "rslearn.train.prediction_writer.RslearnWriter",

@@ -337,7 +337,7 @@ class TestResolutionFactor:
             task=task,
             optimizer=AdamW(lr=0.001),
         )
-        trainer = pl.Trainer(max_epochs=10)
+        trainer = pl.Trainer(accelerator="cpu", max_epochs=10)
         trainer.fit(lm, datamodule=data_module)
 
         # Make sure model produces the right output.

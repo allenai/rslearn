@@ -75,6 +75,7 @@ def test_simple_model_config(
     # We define a model config for classification task, corresponding to the
     # image_to_class_dataset from tests/fixtures/datasets/image_to_class.py.
     cfg = {
+        "trainer": {"accelerator": "cpu"},
         "model": {
             "class_path": "rslearn.train.lightning_module.RslearnLightningModule",
             "init_args": {
