@@ -1,5 +1,7 @@
 rslearn is a tool for developing remote sensing datasets and models.
 
+[![Codecov coverage](https://codecov.io/gh/allenai/rslearn/branch/master/graph/badge.svg)](https://app.codecov.io/gh/allenai/rslearn)
+
 rslearn helps with:
 
 1. Developing remote sensing datasets, starting with defining spatiotemporal windows
